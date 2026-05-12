@@ -1,0 +1,1766 @@
+<!DOCTYPE html>
+<html lang="en" class="">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NimbusPulse — Unified Data Ingestion & Analytics</title>
+<meta name="description" content="A Datadog-like unified observability simulation. Ingests cloud logs, system logs, security events, and custom sources. IBM design language." />
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: { extend: {
+      colors: { ibm: {
+        blue:'#0f62fe', blue70:'#0043ce', blue80:'#002d9c',
+        blue30:'#a6c8ff', blue20:'#d0e2ff', blue10:'#edf5ff',
+        cyan:'#1192e8', teal:'#009d9a', green:'#24a148',
+        yellow:'#f1c21b', orange:'#ff832b', red:'#da1e28',
+        magenta:'#ee5396', purple:'#8a3ffc',
+        gray10:'#f4f4f4', gray20:'#e0e0e0', gray30:'#c6c6c6',
+        gray50:'#8d8d8d', gray70:'#525252', gray80:'#393939',
+        gray90:'#262626', gray100:'#161616'
+      }},
+      fontFamily: {
+        sans:['"IBM Plex Sans"','system-ui','sans-serif'],
+        mono:['"IBM Plex Mono"','ui-monospace','monospace']
+      }
+    }}
+  }
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<style>
+  html { scroll-behavior: smooth; }
+  body { font-family: 'IBM Plex Sans', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  .font-mono { font-family: 'IBM Plex Mono', monospace; }
+  .grid-bg {
+    background-image:
+      linear-gradient(to right, rgba(15,98,254,0.07) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(15,98,254,0.07) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .dark .grid-bg {
+    background-image:
+      linear-gradient(to right, rgba(166,200,255,0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(166,200,255,0.06) 1px, transparent 1px);
+  }
+  @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(1.5)} }
+  .live-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
+  @keyframes slide-in { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
+  .row-new { animation: slide-in 0.35s ease-out; }
+  @keyframes fade-in { from{opacity:0} to{opacity:1} }
+  .modal-enter { animation: fade-in 0.2s ease-out; }
+  @keyframes typing { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-4px)} }
+  .typing-dot { animation: typing 1.2s ease-in-out infinite; display:inline-block; width:6px; height:6px; border-radius:50%; background:#0f62fe; margin:0 2px; }
+  .typing-dot:nth-child(2){ animation-delay:.15s }
+  .typing-dot:nth-child(3){ animation-delay:.3s }
+  .chip { display:inline-flex; align-items:center; gap:.25rem; padding:.125rem .5rem; border-radius:.125rem; font-size:.7rem; font-weight:500; font-family:'IBM Plex Mono', monospace; letter-spacing:.02em; }
+  ::-webkit-scrollbar { width:8px; height:8px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:#c6c6c6; }
+  .dark ::-webkit-scrollbar-thumb { background:#525252; }
+  *:focus-visible { outline: 2px solid #0f62fe; outline-offset: 2px; }
+  details > summary { list-style:none; cursor:pointer; }
+  details > summary::-webkit-details-marker { display:none; }
+  details[open] .chevron { transform: rotate(90deg); }
+  .chevron { transition: transform .2s ease; }
+</style>
+</head>
+
+<body class="bg-white text-ibm-gray100 dark:bg-ibm-gray100 dark:text-ibm-gray10 transition-colors duration-150">
+
+<!-- HEADER -->
+<header class="sticky top-0 z-40 border-b border-ibm-gray20 dark:border-ibm-gray80 bg-white/95 dark:bg-ibm-gray100/95 backdrop-blur">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
+    <div class="flex items-center gap-6">
+      <a href="#top" class="flex items-center gap-2.5">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <rect x="2" y="2" width="28" height="28" fill="#0f62fe"/>
+          <path d="M8 10h16M8 16h10M8 22h13" stroke="white" stroke-width="2"/>
+          <circle cx="22" cy="16" r="2" fill="white"/>
+          <circle cx="25" cy="22" r="2" fill="white"/>
+        </svg>
+        <div class="leading-tight">
+          <div class="font-semibold text-sm tracking-tight">NimbusPulse</div>
+          <div class="text-[10px] font-mono text-ibm-gray50 uppercase tracking-wider">Observability Platform</div>
+        </div>
+      </a>
+      <nav class="hidden lg:flex items-center gap-1 text-sm">
+        <a href="#dashboard" class="px-3 py-1.5 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Dashboard</a>
+        <a href="#connectors" class="px-3 py-1.5 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Connectors</a>
+        <a href="#events" class="px-3 py-1.5 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Events</a>
+        <a href="#logs" class="px-3 py-1.5 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Logs</a>
+        <a href="#architecture" class="px-3 py-1.5 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Architecture</a>
+        <a href="#ai-assistant" class="px-3 py-1.5 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">AI Assistant</a>
+      </nav>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="hidden sm:inline-flex items-center gap-2 text-xs font-mono text-ibm-gray70 dark:text-ibm-gray30">
+        <span class="live-dot w-2 h-2 rounded-full bg-ibm-green inline-block"></span>
+        <span id="liveStatus">LIVE — 0 ev/s</span>
+      </span>
+      <button id="themeToggle" aria-label="Toggle theme" class="p-2 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">
+        <svg id="iconSun" class="w-4 h-4 hidden dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg id="iconMoon" class="w-4 h-4 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- HERO -->
+<section class="grid-bg border-b border-ibm-gray20 dark:border-ibm-gray80">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-14 lg:py-20">
+    <div class="grid lg:grid-cols-12 gap-8 items-end">
+      <div class="lg:col-span-8">
+        <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue mb-4">Unified Observability · Interactive Simulation</div>
+        <h1 class="text-4xl sm:text-5xl lg:text-6xl font-light leading-[1.05] tracking-tight">
+          One pipeline for every<br/>
+          <span class="font-semibold text-ibm-blue">log, metric, event, and trace.</span>
+        </h1>
+        <p class="mt-6 text-base sm:text-lg text-ibm-gray70 dark:text-ibm-gray30 max-w-2xl leading-relaxed">
+          NimbusPulse ingests data from AWS, Azure, GCP, Kubernetes, system logs, security tools, databases, and custom sources — through declarative connectors defined in <span class="font-mono text-ibm-blue">JSON</span> or <span class="font-mono text-ibm-blue">YAML</span>. Every button, modal, chart, and the AI assistant below is fully interactive on static data + localStorage.
+        </p>
+        <div class="mt-8 flex flex-wrap gap-3">
+          <a href="#dashboard" class="px-5 py-2.5 bg-ibm-blue text-white text-sm font-medium hover:bg-ibm-blue70 transition">Open Dashboard →</a>
+          <a href="#connectors" class="px-5 py-2.5 border border-ibm-gray30 dark:border-ibm-gray70 text-sm hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Browse Connectors</a>
+          <a href="#ai-assistant" class="px-5 py-2.5 border border-ibm-gray30 dark:border-ibm-gray70 text-sm hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Ask the AI Assistant</a>
+        </div>
+      </div>
+      <div class="lg:col-span-4 grid grid-cols-2 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80">
+        <div class="bg-white dark:bg-ibm-gray100 p-4"><div class="font-mono text-2xl font-semibold text-ibm-blue">22</div><div class="text-xs text-ibm-gray70 dark:text-ibm-gray30 mt-1">Source connectors</div></div>
+        <div class="bg-white dark:bg-ibm-gray100 p-4"><div class="font-mono text-2xl font-semibold text-ibm-blue">5</div><div class="text-xs text-ibm-gray70 dark:text-ibm-gray30 mt-1">Ingest protocols</div></div>
+        <div class="bg-white dark:bg-ibm-gray100 p-4"><div class="font-mono text-2xl font-semibold text-ibm-blue">JSON</div><div class="text-xs text-ibm-gray70 dark:text-ibm-gray30 mt-1">Schema format</div></div>
+        <div class="bg-white dark:bg-ibm-gray100 p-4"><div class="font-mono text-2xl font-semibold text-ibm-blue">YAML</div><div class="text-xs text-ibm-gray70 dark:text-ibm-gray30 mt-1">Schema format</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- HIGH-LEVEL ARCHITECTURE -->
+<section class="border-b border-ibm-gray20 dark:border-ibm-gray80">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
+    <div class="mb-8">
+      <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue mb-2">§ 01 — System Overview</div>
+      <h2 class="text-2xl sm:text-3xl font-light">How data moves through NimbusPulse</h2>
+      <p class="mt-3 text-sm text-ibm-gray70 dark:text-ibm-gray30 max-w-3xl">Five logical stages. Sources push, or are pulled by connectors, normalized into a common event schema, enriched, then routed to storage and the dashboard. Every stage is horizontally scalable.</p>
+    </div>
+
+    <div class="border border-ibm-gray20 dark:border-ibm-gray80 bg-ibm-gray10/40 dark:bg-ibm-gray90/40 p-4 sm:p-6 overflow-x-auto">
+      <svg viewBox="0 0 1200 360" class="w-full min-w-[900px]" role="img" aria-label="High-level data flow diagram">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#0f62fe"/></marker>
+        </defs>
+        <g>
+          <text x="100" y="30" text-anchor="middle" font-family="IBM Plex Mono" font-size="11" fill="#0f62fe" font-weight="600">01 · SOURCES</text>
+          <rect x="20" y="50" width="160" height="280" fill="none" stroke="#a6c8ff" stroke-dasharray="4 4"/>
+          <g font-family="IBM Plex Mono" font-size="11">
+            <rect x="35" y="65" width="130" height="28" fill="#0f62fe"/><text x="100" y="84" text-anchor="middle" fill="white">AWS CloudWatch</text>
+            <rect x="35" y="100" width="130" height="28" fill="#1192e8"/><text x="100" y="119" text-anchor="middle" fill="white">Azure Monitor</text>
+            <rect x="35" y="135" width="130" height="28" fill="#009d9a"/><text x="100" y="154" text-anchor="middle" fill="white">GCP Logging</text>
+            <rect x="35" y="170" width="130" height="28" fill="#8a3ffc"/><text x="100" y="189" text-anchor="middle" fill="white">Kubernetes</text>
+            <rect x="35" y="205" width="130" height="28" fill="#ee5396"/><text x="100" y="224" text-anchor="middle" fill="white">Syslog / RFC 5424</text>
+            <rect x="35" y="240" width="130" height="28" fill="#ff832b"/><text x="100" y="259" text-anchor="middle" fill="white">Security / SIEM</text>
+            <rect x="35" y="275" width="130" height="28" fill="#525252"/><text x="100" y="294" text-anchor="middle" fill="white">Custom · Webhook</text>
+          </g>
+        </g>
+        <g>
+          <text x="330" y="30" text-anchor="middle" font-family="IBM Plex Mono" font-size="11" fill="#0f62fe" font-weight="600">02 · INGEST</text>
+          <rect x="250" y="50" width="160" height="280" fill="none" stroke="#a6c8ff" stroke-dasharray="4 4"/>
+          <g font-family="IBM Plex Mono" font-size="11" fill="#161616">
+            <rect x="265" y="80" width="130" height="26" fill="white" stroke="#0f62fe"/><text x="330" y="98" text-anchor="middle">REST · /v1/ingest</text>
+            <rect x="265" y="115" width="130" height="26" fill="white" stroke="#0f62fe"/><text x="330" y="133" text-anchor="middle">gRPC stream</text>
+            <rect x="265" y="150" width="130" height="26" fill="white" stroke="#0f62fe"/><text x="330" y="168" text-anchor="middle">GraphQL sub.</text>
+            <rect x="265" y="185" width="130" height="26" fill="white" stroke="#0f62fe"/><text x="330" y="203" text-anchor="middle">WebSocket</text>
+            <rect x="265" y="220" width="130" height="26" fill="white" stroke="#0f62fe"/><text x="330" y="238" text-anchor="middle">Kafka topic</text>
+            <rect x="265" y="255" width="130" height="26" fill="white" stroke="#0f62fe"/><text x="330" y="273" text-anchor="middle">Pull · cron</text>
+          </g>
+        </g>
+        <g>
+          <text x="560" y="30" text-anchor="middle" font-family="IBM Plex Mono" font-size="11" fill="#0f62fe" font-weight="600">03 · NORMALIZE</text>
+          <rect x="480" y="50" width="160" height="280" fill="none" stroke="#a6c8ff" stroke-dasharray="4 4"/>
+          <g font-family="IBM Plex Sans" font-size="11" fill="#161616">
+            <rect x="495" y="90" width="130" height="42" fill="#edf5ff" stroke="#0f62fe"/>
+            <text x="560" y="108" text-anchor="middle" font-weight="600">Schema map</text>
+            <text x="560" y="123" text-anchor="middle" font-family="IBM Plex Mono" font-size="9">connector.yaml</text>
+            <rect x="495" y="145" width="130" height="42" fill="#edf5ff" stroke="#0f62fe"/>
+            <text x="560" y="163" text-anchor="middle" font-weight="600">Enrich</text>
+            <text x="560" y="178" text-anchor="middle" font-family="IBM Plex Mono" font-size="9">geo · user · trace</text>
+            <rect x="495" y="200" width="130" height="42" fill="#edf5ff" stroke="#0f62fe"/>
+            <text x="560" y="218" text-anchor="middle" font-weight="600">Filter / Mask</text>
+            <text x="560" y="233" text-anchor="middle" font-family="IBM Plex Mono" font-size="9">PII redaction</text>
+            <rect x="495" y="255" width="130" height="42" fill="#edf5ff" stroke="#0f62fe"/>
+            <text x="560" y="273" text-anchor="middle" font-weight="600">Route</text>
+            <text x="560" y="288" text-anchor="middle" font-family="IBM Plex Mono" font-size="9">topic.events.*</text>
+          </g>
+        </g>
+        <g>
+          <text x="790" y="30" text-anchor="middle" font-family="IBM Plex Mono" font-size="11" fill="#0f62fe" font-weight="600">04 · STORE</text>
+          <rect x="710" y="50" width="160" height="280" fill="none" stroke="#a6c8ff" stroke-dasharray="4 4"/>
+          <g font-family="IBM Plex Mono" font-size="11" fill="white">
+            <rect x="725" y="80" width="130" height="34" fill="#002d9c"/><text x="790" y="101" text-anchor="middle">Elasticsearch</text>
+            <rect x="725" y="125" width="130" height="34" fill="#0043ce"/><text x="790" y="146" text-anchor="middle">ClickHouse · OLAP</text>
+            <rect x="725" y="170" width="130" height="34" fill="#0f62fe"/><text x="790" y="191" text-anchor="middle">S3 · cold storage</text>
+            <rect x="725" y="215" width="130" height="34" fill="#1192e8"/><text x="790" y="236" text-anchor="middle">Redis · hot cache</text>
+            <rect x="725" y="260" width="130" height="34" fill="#009d9a"/><text x="790" y="281" text-anchor="middle">TimescaleDB</text>
+          </g>
+        </g>
+        <g>
+          <text x="1020" y="30" text-anchor="middle" font-family="IBM Plex Mono" font-size="11" fill="#0f62fe" font-weight="600">05 · CONSUME</text>
+          <rect x="940" y="50" width="160" height="280" fill="none" stroke="#a6c8ff" stroke-dasharray="4 4"/>
+          <g font-family="IBM Plex Sans" font-size="11" fill="#161616">
+            <rect x="955" y="90" width="130" height="40" fill="#0f62fe"/>
+            <text x="1020" y="108" text-anchor="middle" fill="white" font-weight="600">Dashboards</text>
+            <text x="1020" y="122" text-anchor="middle" fill="#d0e2ff" font-family="IBM Plex Mono" font-size="9">live tiles</text>
+            <rect x="955" y="145" width="130" height="40" fill="white" stroke="#0f62fe"/>
+            <text x="1020" y="163" text-anchor="middle" font-weight="600">Alerts</text>
+            <text x="1020" y="177" text-anchor="middle" font-family="IBM Plex Mono" font-size="9">PagerDuty · Slack</text>
+            <rect x="955" y="200" width="130" height="40" fill="white" stroke="#0f62fe"/>
+            <text x="1020" y="218" text-anchor="middle" font-weight="600">AI Assistant</text>
+            <text x="1020" y="232" text-anchor="middle" font-family="IBM Plex Mono" font-size="9">LLM · RAG</text>
+            <rect x="955" y="255" width="130" height="40" fill="white" stroke="#0f62fe"/>
+            <text x="1020" y="273" text-anchor="middle" font-weight="600">Search / Export</text>
+            <text x="1020" y="287" text-anchor="middle" font-family="IBM Plex Mono" font-size="9">REST · CSV · API</text>
+          </g>
+        </g>
+        <g stroke="#0f62fe" stroke-width="1.5" fill="none" marker-end="url(#arr)">
+          <line x1="180" y1="190" x2="248" y2="190"/>
+          <line x1="410" y1="190" x2="478" y2="190"/>
+          <line x1="640" y1="190" x2="708" y2="190"/>
+          <line x1="870" y1="190" x2="938" y2="190"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="mt-4 flex flex-wrap gap-2 text-xs">
+      <button class="px-3 py-1.5 border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-blue hover:text-white hover:border-ibm-blue transition" onclick="openExplain('overview')">Explain this diagram →</button>
+      <button class="px-3 py-1.5 border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-blue hover:text-white hover:border-ibm-blue transition" onclick="openExplain('schema')">What's in an event schema?</button>
+      <button class="px-3 py-1.5 border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-blue hover:text-white hover:border-ibm-blue transition" onclick="openExplain('enrich')">Why normalize & enrich?</button>
+    </div>
+  </div>
+</section>
+
+<!-- DASHBOARD -->
+<section id="dashboard" class="border-b border-ibm-gray20 dark:border-ibm-gray80">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
+    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
+      <div>
+        <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue mb-2">§ 02 — Live Dashboard</div>
+        <h2 class="text-2xl sm:text-3xl font-light">Real-time signals from every source</h2>
+        <p class="mt-3 text-sm text-ibm-gray70 dark:text-ibm-gray30 max-w-3xl">Tiles update every 2 seconds from the in-memory event simulator. Click any tile to see what the metric measures and how it's computed.</p>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="toggleSimulation()" id="simBtn" class="px-3 py-2 text-xs font-mono bg-ibm-blue text-white hover:bg-ibm-blue70 transition">⏸ PAUSE</button>
+        <button onclick="resetSimulation()" class="px-3 py-2 text-xs font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">↻ RESET</button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80 mb-6">
+      <button onclick="openExplain('kpi-events')" class="bg-white dark:bg-ibm-gray100 p-5 text-left hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition group">
+        <div class="flex items-start justify-between mb-2">
+          <span class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30">Events / sec</span>
+          <span class="text-xs text-ibm-blue group-hover:underline">explain</span>
+        </div>
+        <div class="font-mono text-3xl font-semibold text-ibm-blue" id="kpiEvents">—</div>
+        <div class="text-xs text-ibm-gray70 dark:text-ibm-gray30 mt-1"><span id="kpiEventsDelta" class="text-ibm-green">+0%</span> vs last min</div>
+      </button>
+      <button onclick="openExplain('kpi-error')" class="bg-white dark:bg-ibm-gray100 p-5 text-left hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition group">
+        <div class="flex items-start justify-between mb-2">
+          <span class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30">Error rate</span>
+          <span class="text-xs text-ibm-blue group-hover:underline">explain</span>
+        </div>
+        <div class="font-mono text-3xl font-semibold text-ibm-red" id="kpiError">—</div>
+        <div class="text-xs text-ibm-gray70 dark:text-ibm-gray30 mt-1"><span id="kpiErrorDelta">—</span> SLO 1.0%</div>
+      </button>
+      <button onclick="openExplain('kpi-sources')" class="bg-white dark:bg-ibm-gray100 p-5 text-left hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition group">
+        <div class="flex items-start justify-between mb-2">
+          <span class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30">Active sources</span>
+          <span class="text-xs text-ibm-blue group-hover:underline">explain</span>
+        </div>
+        <div class="font-mono text-3xl font-semibold" id="kpiSources">—</div>
+        <div class="text-xs text-ibm-gray70 dark:text-ibm-gray30 mt-1"><span id="kpiSourcesTotal">of 22</span> connectors</div>
+      </button>
+      <button onclick="openExplain('kpi-volume')" class="bg-white dark:bg-ibm-gray100 p-5 text-left hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition group">
+        <div class="flex items-start justify-between mb-2">
+          <span class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30">Ingest volume / hr</span>
+          <span class="text-xs text-ibm-blue group-hover:underline">explain</span>
+        </div>
+        <div class="font-mono text-3xl font-semibold" id="kpiVolume">—</div>
+        <div class="text-xs text-ibm-gray70 dark:text-ibm-gray30 mt-1">compressed gzip</div>
+      </button>
+    </div>
+
+    <div class="grid lg:grid-cols-3 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80">
+      <div class="lg:col-span-2 bg-white dark:bg-ibm-gray100 p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <div class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30">Throughput · last 60 ticks</div>
+            <div class="text-sm font-medium mt-0.5">Events per second across all sources</div>
+          </div>
+          <button onclick="openExplain('throughput')" class="text-xs text-ibm-blue hover:underline">What is throughput? →</button>
+        </div>
+        <svg id="throughputChart" viewBox="0 0 600 180" class="w-full h-44" preserveAspectRatio="none"></svg>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <div class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30">By severity</div>
+            <div class="text-sm font-medium mt-0.5">Last 5 minutes</div>
+          </div>
+          <button onclick="openExplain('severity')" class="text-xs text-ibm-blue hover:underline">explain →</button>
+        </div>
+        <div id="severityBars" class="space-y-2.5"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CONNECTORS -->
+<section id="connectors" class="border-b border-ibm-gray20 dark:border-ibm-gray80 bg-ibm-gray10/50 dark:bg-ibm-gray100">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
+    <div class="mb-8">
+      <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue mb-2">§ 03 — Source Connectors</div>
+      <h2 class="text-2xl sm:text-3xl font-light">22 built-in connectors, plus your own</h2>
+      <p class="mt-3 text-sm text-ibm-gray70 dark:text-ibm-gray30 max-w-3xl">Each connector is a declarative spec: protocol, endpoint, auth, schedule, and field schema. Toggle a connector to start or stop ingestion. Custom connectors you add are saved to <span class="font-mono text-ibm-blue">localStorage</span> and appear below alongside the built-ins.</p>
+    </div>
+
+    <div id="connectorGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80"></div>
+
+    <!-- Add custom connector -->
+    <div class="mt-10">
+      <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-4">
+        <div>
+          <h3 class="text-xl font-light">Add a custom connector</h3>
+          <p class="text-sm text-ibm-gray70 dark:text-ibm-gray30 mt-1">Paste a JSON or YAML schema below. It will be validated, saved, and appear in the grid above.</p>
+        </div>
+        <div class="flex gap-2 text-xs font-mono">
+          <button onclick="loadSample('json')" class="px-3 py-1.5 border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-white dark:hover:bg-ibm-gray90 transition">Load JSON sample</button>
+          <button onclick="loadSample('yaml')" class="px-3 py-1.5 border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-white dark:hover:bg-ibm-gray90 transition">Load YAML sample</button>
+        </div>
+      </div>
+      <div class="grid lg:grid-cols-5 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80">
+        <div class="lg:col-span-3 bg-white dark:bg-ibm-gray100 p-0">
+          <div class="flex items-center justify-between px-4 py-2 border-b border-ibm-gray20 dark:border-ibm-gray80">
+            <span class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30">connector.spec</span>
+            <span class="text-xs font-mono text-ibm-gray50" id="schemaFormat">JSON</span>
+          </div>
+          <textarea id="connectorInput" rows="14" class="w-full p-4 font-mono text-xs bg-transparent border-0 focus:ring-0 resize-y" placeholder="Paste a connector schema here, or click 'Load sample' above..."></textarea>
+        </div>
+        <div class="lg:col-span-2 bg-white dark:bg-ibm-gray100 p-5">
+          <div class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30 mb-3">Validation</div>
+          <div id="validationOut" class="text-xs font-mono space-y-1.5 mb-5 text-ibm-gray70 dark:text-ibm-gray30">Awaiting input…</div>
+          <button onclick="validateConnector()" class="w-full mb-2 px-4 py-2 text-xs font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Validate</button>
+          <button onclick="saveConnector()" class="w-full px-4 py-2 text-xs font-mono bg-ibm-blue text-white hover:bg-ibm-blue70 transition">Save connector →</button>
+          <button onclick="clearCustomConnectors()" class="w-full mt-2 px-4 py-2 text-xs font-mono text-ibm-red hover:bg-ibm-red/10 transition">Clear all custom connectors</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- EVENT STREAM -->
+<section id="events" class="border-b border-ibm-gray20 dark:border-ibm-gray80">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
+    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
+      <div>
+        <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue mb-2">§ 04 — Live Event Stream</div>
+        <h2 class="text-2xl sm:text-3xl font-light">Every event, as it arrives</h2>
+        <p class="mt-3 text-sm text-ibm-gray70 dark:text-ibm-gray30 max-w-3xl">A continuous feed of normalized events. Click any row to see the raw payload, run an explanation, or take action (acknowledge, mute, investigate, replay).</p>
+      </div>
+      <div class="flex flex-wrap gap-2 text-xs">
+        <select id="eventSevFilter" class="px-2 py-1.5 border border-ibm-gray30 dark:border-ibm-gray70 bg-white dark:bg-ibm-gray100 font-mono">
+          <option value="">All severities</option>
+          <option value="DEBUG">DEBUG</option>
+          <option value="INFO">INFO</option>
+          <option value="WARN">WARN</option>
+          <option value="ERROR">ERROR</option>
+          <option value="CRITICAL">CRITICAL</option>
+        </select>
+        <select id="eventSrcFilter" class="px-2 py-1.5 border border-ibm-gray30 dark:border-ibm-gray70 bg-white dark:bg-ibm-gray100 font-mono">
+          <option value="">All sources</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="border border-ibm-gray20 dark:border-ibm-gray80 bg-white dark:bg-ibm-gray100 overflow-hidden">
+      <div class="grid grid-cols-12 gap-2 px-4 py-2.5 text-[10px] font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30 border-b border-ibm-gray20 dark:border-ibm-gray80 bg-ibm-gray10/50 dark:bg-ibm-gray90/50">
+        <div class="col-span-2 sm:col-span-2">Time</div>
+        <div class="col-span-1">Sev</div>
+        <div class="col-span-3 sm:col-span-2">Source</div>
+        <div class="col-span-6 sm:col-span-6">Message</div>
+        <div class="hidden sm:block sm:col-span-1 text-right">⋯</div>
+      </div>
+      <div id="eventList" class="max-h-[460px] overflow-y-auto"></div>
+    </div>
+  </div>
+</section>
+
+<!-- LOGS EXPLORER -->
+<section id="logs" class="border-b border-ibm-gray20 dark:border-ibm-gray80 bg-ibm-gray10/50 dark:bg-ibm-gray100">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
+    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
+      <div>
+        <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue mb-2">§ 05 — Logs Explorer</div>
+        <h2 class="text-2xl sm:text-3xl font-light">Search & drill into raw log lines</h2>
+        <p class="mt-3 text-sm text-ibm-gray70 dark:text-ibm-gray30 max-w-3xl">Use the search to filter by message text, source, or severity. Click a row to see structured fields, the original raw line, and an AI explanation of what likely happened.</p>
+      </div>
+      <input id="logSearch" type="text" placeholder="search messages…" class="px-3 py-2 text-sm border border-ibm-gray30 dark:border-ibm-gray70 bg-white dark:bg-ibm-gray90 font-mono w-full sm:w-72" />
+    </div>
+
+    <div class="border border-ibm-gray20 dark:border-ibm-gray80 bg-white dark:bg-ibm-gray100 overflow-hidden">
+      <div id="logList" class="divide-y divide-ibm-gray20 dark:divide-ibm-gray80"></div>
+    </div>
+  </div>
+</section>
+
+<!-- INGESTION PROTOCOLS -->
+<section class="border-b border-ibm-gray20 dark:border-ibm-gray80">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
+    <div class="mb-8">
+      <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue mb-2">§ 06 — Ingestion Protocols</div>
+      <h2 class="text-2xl sm:text-3xl font-light">Pick the right wire format per source</h2>
+      <p class="mt-3 text-sm text-ibm-gray70 dark:text-ibm-gray30 max-w-3xl">Different sources speak different protocols. The platform exposes five gateways; connectors pick whichever fits the source. Below is each protocol with a flow example.</p>
+    </div>
+
+    <div class="grid md:grid-cols-2 lg:grid-cols-5 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80">
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">REST</div>
+        <div class="text-sm font-medium mb-2">POST /v1/ingest</div>
+        <div class="text-xs text-ibm-gray70 dark:text-ibm-gray30 mb-3">Push, batched. Best for periodic exports, webhook receivers, low-volume agents.</div>
+        <svg viewBox="0 0 200 80" class="w-full"><g font-family="IBM Plex Mono" font-size="9"><rect x="5" y="25" width="55" height="30" fill="#0f62fe"/><text x="32" y="44" text-anchor="middle" fill="white">Client</text><rect x="140" y="25" width="55" height="30" fill="white" stroke="#0f62fe"/><text x="167" y="44" text-anchor="middle" fill="#161616">Gateway</text><line x1="60" y1="40" x2="138" y2="40" stroke="#0f62fe" stroke-width="1.5" marker-end="url(#arr)"/><text x="100" y="34" text-anchor="middle" fill="#0f62fe">POST JSON</text><text x="100" y="56" text-anchor="middle" fill="#525252">200 OK</text></g></svg>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">gRPC</div>
+        <div class="text-sm font-medium mb-2">Stream RPC</div>
+        <div class="text-xs text-ibm-gray70 dark:text-ibm-gray30 mb-3">Bidirectional, binary, schema-strict. Best for high-volume agents (k8s, edge).</div>
+        <svg viewBox="0 0 200 80" class="w-full"><g font-family="IBM Plex Mono" font-size="9"><rect x="5" y="25" width="55" height="30" fill="#0f62fe"/><text x="32" y="44" text-anchor="middle" fill="white">Agent</text><rect x="140" y="25" width="55" height="30" fill="white" stroke="#0f62fe"/><text x="167" y="44" text-anchor="middle" fill="#161616">gRPC svc</text><line x1="60" y1="35" x2="138" y2="35" stroke="#0f62fe" stroke-width="1.5" marker-end="url(#arr)"/><line x1="138" y1="50" x2="60" y2="50" stroke="#0f62fe" stroke-width="1.5" marker-end="url(#arr)"/><text x="100" y="30" text-anchor="middle" fill="#0f62fe">protobuf</text><text x="100" y="62" text-anchor="middle" fill="#525252">ack</text></g></svg>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">GraphQL</div>
+        <div class="text-sm font-medium mb-2">Subscriptions</div>
+        <div class="text-xs text-ibm-gray70 dark:text-ibm-gray30 mb-3">Selective field subscriptions. Best for UIs that need a focused live feed.</div>
+        <svg viewBox="0 0 200 80" class="w-full"><g font-family="IBM Plex Mono" font-size="9"><rect x="5" y="25" width="55" height="30" fill="#0f62fe"/><text x="32" y="44" text-anchor="middle" fill="white">UI</text><rect x="140" y="25" width="55" height="30" fill="white" stroke="#0f62fe"/><text x="167" y="44" text-anchor="middle" fill="#161616">GQL</text><line x1="60" y1="35" x2="138" y2="35" stroke="#0f62fe" stroke-width="1.5" marker-end="url(#arr)"/><line x1="138" y1="50" x2="60" y2="50" stroke="#0f62fe" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#arr)"/><text x="100" y="30" text-anchor="middle" fill="#0f62fe">subscribe</text><text x="100" y="62" text-anchor="middle" fill="#525252">events…</text></g></svg>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">WebSocket</div>
+        <div class="text-sm font-medium mb-2">wss://ingest</div>
+        <div class="text-xs text-ibm-gray70 dark:text-ibm-gray30 mb-3">Persistent duplex. Best for browser apps, IoT, and bidirectional control.</div>
+        <svg viewBox="0 0 200 80" class="w-full"><g font-family="IBM Plex Mono" font-size="9"><rect x="5" y="25" width="55" height="30" fill="#0f62fe"/><text x="32" y="44" text-anchor="middle" fill="white">Browser</text><rect x="140" y="25" width="55" height="30" fill="white" stroke="#0f62fe"/><text x="167" y="44" text-anchor="middle" fill="#161616">WS svc</text><path d="M60 40 Q100 25 138 40" stroke="#0f62fe" stroke-width="1.5" fill="none"/><path d="M138 42 Q100 55 60 42" stroke="#0f62fe" stroke-width="1.5" fill="none"/><text x="100" y="20" text-anchor="middle" fill="#0f62fe">open frame</text><text x="100" y="70" text-anchor="middle" fill="#525252">messages</text></g></svg>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">Kafka</div>
+        <div class="text-sm font-medium mb-2">topic.ingest</div>
+        <div class="text-xs text-ibm-gray70 dark:text-ibm-gray30 mb-3">Durable log-based queue. Best for backpressure, replay, multi-consumer fanout.</div>
+        <svg viewBox="0 0 200 80" class="w-full"><g font-family="IBM Plex Mono" font-size="9"><rect x="5" y="25" width="55" height="30" fill="#0f62fe"/><text x="32" y="44" text-anchor="middle" fill="white">Producer</text><rect x="78" y="25" width="44" height="30" fill="#002d9c"/><text x="100" y="44" text-anchor="middle" fill="white">Kafka</text><rect x="140" y="25" width="55" height="30" fill="white" stroke="#0f62fe"/><text x="167" y="44" text-anchor="middle" fill="#161616">Consumer</text><line x1="60" y1="40" x2="76" y2="40" stroke="#0f62fe" stroke-width="1.5" marker-end="url(#arr)"/><line x1="122" y1="40" x2="138" y2="40" stroke="#0f62fe" stroke-width="1.5" marker-end="url(#arr)"/></g></svg>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PRODUCTION ARCHITECTURE -->
+<section id="architecture" class="border-b border-ibm-gray20 dark:border-ibm-gray80 bg-ibm-gray10/50 dark:bg-ibm-gray100">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
+    <div class="mb-8">
+      <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue mb-2">§ 07 — Production Architecture · Target State</div>
+      <h2 class="text-2xl sm:text-3xl font-light">What we'd actually build, behind this UI</h2>
+      <p class="mt-3 text-sm text-ibm-gray70 dark:text-ibm-gray30 max-w-3xl">The simulation above is the front-end of the system. Below is the production reference architecture this UI is designed against: <span class="font-mono text-ibm-blue">Apache NiFi</span> as the dataflow orchestrator, <span class="font-mono text-ibm-blue">Kafka</span> as the durable bus, <span class="font-mono text-ibm-blue">Flink</span> for stream processing, and a polyglot storage layer feeding the dashboard, alerts, and AI assistant.</p>
+    </div>
+
+    <div class="border border-ibm-gray20 dark:border-ibm-gray80 bg-white dark:bg-ibm-gray100 p-4 sm:p-6 overflow-x-auto">
+      <svg viewBox="0 0 1320 600" class="w-full min-w-[1100px]" role="img" aria-label="Production architecture diagram with Apache NiFi">
+        <defs>
+          <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#0f62fe"/></marker>
+          <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#525252"/></marker>
+        </defs>
+
+        <!-- Section labels -->
+        <text x="100" y="25" font-family="IBM Plex Mono" font-size="11" fill="#0f62fe" font-weight="600">SOURCES</text>
+        <text x="340" y="25" font-family="IBM Plex Mono" font-size="11" fill="#0f62fe" font-weight="600">INGEST GATEWAYS</text>
+        <text x="610" y="25" font-family="IBM Plex Mono" font-size="11" fill="#0f62fe" font-weight="600">DATAFLOW · APACHE NiFi</text>
+        <text x="880" y="25" font-family="IBM Plex Mono" font-size="11" fill="#0f62fe" font-weight="600">STREAM BUS &amp; PROCESS</text>
+        <text x="1180" y="25" font-family="IBM Plex Mono" font-size="11" fill="#0f62fe" font-weight="600">STORAGE</text>
+
+        <!-- SOURCES column -->
+        <g font-family="IBM Plex Mono" font-size="10">
+          <rect x="20" y="45" width="160" height="24" fill="#0f62fe"/><text x="100" y="61" text-anchor="middle" fill="white">AWS CloudWatch / S3</text>
+          <rect x="20" y="75" width="160" height="24" fill="#1192e8"/><text x="100" y="91" text-anchor="middle" fill="white">Azure Monitor / Event Hub</text>
+          <rect x="20" y="105" width="160" height="24" fill="#009d9a"/><text x="100" y="121" text-anchor="middle" fill="white">GCP Logging / Pub/Sub</text>
+          <rect x="20" y="135" width="160" height="24" fill="#8a3ffc"/><text x="100" y="151" text-anchor="middle" fill="white">Kubernetes (Fluent Bit)</text>
+          <rect x="20" y="165" width="160" height="24" fill="#ee5396"/><text x="100" y="181" text-anchor="middle" fill="white">Syslog / RFC 5424</text>
+          <rect x="20" y="195" width="160" height="24" fill="#ff832b"/><text x="100" y="211" text-anchor="middle" fill="white">Security tools / SIEM</text>
+          <rect x="20" y="225" width="160" height="24" fill="#da1e28"/><text x="100" y="241" text-anchor="middle" fill="white">IoT / Edge devices</text>
+          <rect x="20" y="255" width="160" height="24" fill="#24a148"/><text x="100" y="271" text-anchor="middle" fill="white">DB CDC (Debezium)</text>
+          <rect x="20" y="285" width="160" height="24" fill="#525252"/><text x="100" y="301" text-anchor="middle" fill="white">Custom apps / Webhooks</text>
+        </g>
+
+        <!-- INGEST GATEWAYS column -->
+        <g font-family="IBM Plex Mono" font-size="10" fill="#161616">
+          <rect x="260" y="55" width="160" height="32" fill="white" stroke="#0f62fe"/><text x="340" y="69" text-anchor="middle">REST Gateway</text><text x="340" y="81" text-anchor="middle" fill="#525252" font-size="8">Nginx · OpenAPI</text>
+          <rect x="260" y="95" width="160" height="32" fill="white" stroke="#0f62fe"/><text x="340" y="109" text-anchor="middle">gRPC Service</text><text x="340" y="121" text-anchor="middle" fill="#525252" font-size="8">Envoy · protobuf</text>
+          <rect x="260" y="135" width="160" height="32" fill="white" stroke="#0f62fe"/><text x="340" y="149" text-anchor="middle">GraphQL Gateway</text><text x="340" y="161" text-anchor="middle" fill="#525252" font-size="8">Apollo · subscriptions</text>
+          <rect x="260" y="175" width="160" height="32" fill="white" stroke="#0f62fe"/><text x="340" y="189" text-anchor="middle">WebSocket Hub</text><text x="340" y="201" text-anchor="middle" fill="#525252" font-size="8">socket.io · sticky</text>
+          <rect x="260" y="215" width="160" height="32" fill="white" stroke="#0f62fe"/><text x="340" y="229" text-anchor="middle">Kafka Connect</text><text x="340" y="241" text-anchor="middle" fill="#525252" font-size="8">source connectors</text>
+          <rect x="260" y="255" width="160" height="32" fill="white" stroke="#0f62fe"/><text x="340" y="269" text-anchor="middle">Pull Scheduler</text><text x="340" y="281" text-anchor="middle" fill="#525252" font-size="8">cron · cloud APIs</text>
+        </g>
+
+        <!-- APACHE NIFI center -->
+        <rect x="490" y="45" width="240" height="260" fill="#edf5ff" stroke="#0f62fe" stroke-width="2"/>
+        <g font-family="IBM Plex Sans" font-size="11" fill="#161616">
+          <text x="610" y="65" text-anchor="middle" font-weight="700" fill="#0f62fe" font-size="13">Apache NiFi</text>
+          <text x="610" y="80" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#525252">dataflow orchestration</text>
+
+          <rect x="505" y="92" width="210" height="28" fill="white" stroke="#0f62fe"/>
+          <text x="610" y="105" text-anchor="middle" font-weight="600" font-size="10">ListenHTTP / ListenTCP</text>
+          <text x="610" y="116" text-anchor="middle" font-family="IBM Plex Mono" font-size="8" fill="#525252">receive from gateways</text>
+
+          <rect x="505" y="125" width="210" height="28" fill="white" stroke="#0f62fe"/>
+          <text x="610" y="138" text-anchor="middle" font-weight="600" font-size="10">EvaluateJsonPath · Schema</text>
+          <text x="610" y="149" text-anchor="middle" font-family="IBM Plex Mono" font-size="8" fill="#525252">parse + validate against registry</text>
+
+          <rect x="505" y="158" width="210" height="28" fill="white" stroke="#0f62fe"/>
+          <text x="610" y="171" text-anchor="middle" font-weight="600" font-size="10">UpdateAttribute · Enrich</text>
+          <text x="610" y="182" text-anchor="middle" font-family="IBM Plex Mono" font-size="8" fill="#525252">geo · user · trace id</text>
+
+          <rect x="505" y="191" width="210" height="28" fill="white" stroke="#0f62fe"/>
+          <text x="610" y="204" text-anchor="middle" font-weight="600" font-size="10">ReplaceText · PII mask</text>
+          <text x="610" y="215" text-anchor="middle" font-family="IBM Plex Mono" font-size="8" fill="#525252">regex redaction · tokenize</text>
+
+          <rect x="505" y="224" width="210" height="28" fill="white" stroke="#0f62fe"/>
+          <text x="610" y="237" text-anchor="middle" font-weight="600" font-size="10">RouteOnAttribute</text>
+          <text x="610" y="248" text-anchor="middle" font-family="IBM Plex Mono" font-size="8" fill="#525252">split by severity / domain</text>
+
+          <rect x="505" y="257" width="210" height="34" fill="#0f62fe"/>
+          <text x="610" y="272" text-anchor="middle" font-weight="600" font-size="10" fill="white">PublishKafkaRecord_2_6</text>
+          <text x="610" y="284" text-anchor="middle" font-family="IBM Plex Mono" font-size="8" fill="#d0e2ff">topic.events.{severity}</text>
+        </g>
+
+        <!-- Kafka + processing -->
+        <g font-family="IBM Plex Mono" font-size="10" fill="white">
+          <rect x="800" y="55" width="170" height="38" fill="#002d9c"/>
+          <text x="885" y="72" text-anchor="middle" font-weight="600">Apache Kafka</text>
+          <text x="885" y="86" text-anchor="middle" font-size="9" fill="#a6c8ff">events · metrics · audit</text>
+
+          <rect x="800" y="100" width="170" height="32" fill="#0043ce"/>
+          <text x="885" y="115" text-anchor="middle" font-weight="600">Schema Registry</text>
+          <text x="885" y="127" text-anchor="middle" font-size="9" fill="#a6c8ff">Confluent · Avro/Proto</text>
+
+          <rect x="800" y="140" width="170" height="32" fill="#0f62fe"/>
+          <text x="885" y="155" text-anchor="middle" font-weight="600">Apache Flink</text>
+          <text x="885" y="167" text-anchor="middle" font-size="9" fill="#d0e2ff">windowed aggregations</text>
+
+          <rect x="800" y="180" width="170" height="32" fill="#1192e8"/>
+          <text x="885" y="195" text-anchor="middle" font-weight="600">Anomaly Detector</text>
+          <text x="885" y="207" text-anchor="middle" font-size="9" fill="white">ML scoring · z-score</text>
+
+          <rect x="800" y="220" width="170" height="32" fill="#8a3ffc"/>
+          <text x="885" y="235" text-anchor="middle" font-weight="600">Alert Engine</text>
+          <text x="885" y="247" text-anchor="middle" font-size="9" fill="white">rules · PagerDuty · Slack</text>
+        </g>
+
+        <!-- Storage -->
+        <g font-family="IBM Plex Mono" font-size="10" fill="white">
+          <rect x="1050" y="55" width="190" height="38" fill="#002d9c"/>
+          <text x="1145" y="72" text-anchor="middle" font-weight="600">Elasticsearch</text>
+          <text x="1145" y="86" text-anchor="middle" font-size="9" fill="#a6c8ff">full-text · 7-day hot</text>
+
+          <rect x="1050" y="100" width="190" height="38" fill="#0043ce"/>
+          <text x="1145" y="117" text-anchor="middle" font-weight="600">ClickHouse</text>
+          <text x="1145" y="131" text-anchor="middle" font-size="9" fill="#a6c8ff">OLAP · columnar</text>
+
+          <rect x="1050" y="145" width="190" height="38" fill="#0f62fe"/>
+          <text x="1145" y="162" text-anchor="middle" font-weight="600">S3 + Iceberg</text>
+          <text x="1145" y="176" text-anchor="middle" font-size="9" fill="#d0e2ff">cold · parquet · 1yr+</text>
+
+          <rect x="1050" y="190" width="190" height="38" fill="#1192e8"/>
+          <text x="1145" y="207" text-anchor="middle" font-weight="600">Redis</text>
+          <text x="1145" y="221" text-anchor="middle" font-size="9" fill="white">hot cache · counters</text>
+
+          <rect x="1050" y="235" width="190" height="38" fill="#009d9a"/>
+          <text x="1145" y="252" text-anchor="middle" font-weight="600">TimescaleDB</text>
+          <text x="1145" y="266" text-anchor="middle" font-size="9" fill="white">metrics · time-series</text>
+        </g>
+
+        <!-- BOTTOM ROW: query + consumers -->
+        <text x="180" y="350" font-family="IBM Plex Mono" font-size="11" fill="#0f62fe" font-weight="600">QUERY · API · AI</text>
+        <g font-family="IBM Plex Sans" font-size="11" fill="#161616">
+          <rect x="20" y="365" width="200" height="44" fill="white" stroke="#0f62fe"/>
+          <text x="120" y="383" text-anchor="middle" font-weight="600">Query API</text>
+          <text x="120" y="398" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#525252">REST · GraphQL · DSL</text>
+
+          <rect x="240" y="365" width="200" height="44" fill="white" stroke="#0f62fe"/>
+          <text x="340" y="383" text-anchor="middle" font-weight="600">Auth · RBAC · Audit</text>
+          <text x="340" y="398" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#525252">Keycloak · OIDC · OPA</text>
+
+          <rect x="460" y="365" width="200" height="44" fill="#edf5ff" stroke="#0f62fe"/>
+          <text x="560" y="383" text-anchor="middle" font-weight="600">RAG · Vector Store</text>
+          <text x="560" y="398" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#525252">pgvector · embeddings</text>
+
+          <rect x="680" y="365" width="200" height="44" fill="#0f62fe"/>
+          <text x="780" y="383" text-anchor="middle" font-weight="600" fill="white">LLM Assistant</text>
+          <text x="780" y="398" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#d0e2ff">explain · summarize · query</text>
+        </g>
+
+        <text x="180" y="445" font-family="IBM Plex Mono" font-size="11" fill="#0f62fe" font-weight="600">CONSUMERS</text>
+        <g font-family="IBM Plex Sans" font-size="11" fill="#161616">
+          <rect x="20" y="460" width="200" height="44" fill="#0f62fe"/>
+          <text x="120" y="478" text-anchor="middle" font-weight="600" fill="white">Web Dashboard</text>
+          <text x="120" y="493" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#d0e2ff">React · live tiles</text>
+
+          <rect x="240" y="460" width="200" height="44" fill="white" stroke="#0f62fe"/>
+          <text x="340" y="478" text-anchor="middle" font-weight="600">Alerts &amp; Paging</text>
+          <text x="340" y="493" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#525252">PagerDuty · Slack · email</text>
+
+          <rect x="460" y="460" width="200" height="44" fill="white" stroke="#0f62fe"/>
+          <text x="560" y="478" text-anchor="middle" font-weight="600">Mobile / CLI</text>
+          <text x="560" y="493" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#525252">iOS · Android · npulse CLI</text>
+
+          <rect x="680" y="460" width="200" height="44" fill="white" stroke="#0f62fe"/>
+          <text x="780" y="478" text-anchor="middle" font-weight="600">Downstream Apps</text>
+          <text x="780" y="493" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#525252">Snowflake · BI · webhooks</text>
+
+          <rect x="900" y="460" width="200" height="44" fill="white" stroke="#0f62fe"/>
+          <text x="1000" y="478" text-anchor="middle" font-weight="600">Compliance Export</text>
+          <text x="1000" y="493" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#525252">SOC2 · HIPAA · GDPR</text>
+        </g>
+
+        <text x="180" y="540" font-family="IBM Plex Mono" font-size="11" fill="#0f62fe" font-weight="600">CROSS-CUTTING</text>
+        <g font-family="IBM Plex Mono" font-size="9" fill="white">
+          <rect x="20" y="555" width="200" height="32" fill="#393939"/><text x="120" y="575" text-anchor="middle">Observability · OTel</text>
+          <rect x="240" y="555" width="200" height="32" fill="#393939"/><text x="340" y="575" text-anchor="middle">Secrets · Vault</text>
+          <rect x="460" y="555" width="200" height="32" fill="#393939"/><text x="560" y="575" text-anchor="middle">Infra · Terraform · K8s</text>
+          <rect x="680" y="555" width="200" height="32" fill="#393939"/><text x="780" y="575" text-anchor="middle">CI/CD · GitOps · ArgoCD</text>
+          <rect x="900" y="555" width="200" height="32" fill="#393939"/><text x="1000" y="575" text-anchor="middle">Cost · FinOps tags</text>
+        </g>
+
+        <!-- arrows: sources -> gateways -->
+        <g stroke="#0f62fe" stroke-width="1.2" fill="none" marker-end="url(#arr2)">
+          <line x1="180" y1="170" x2="258" y2="170"/>
+          <!-- gateways -> NiFi -->
+          <line x1="420" y1="170" x2="488" y2="170"/>
+          <!-- NiFi -> Kafka -->
+          <line x1="730" y1="170" x2="798" y2="170"/>
+          <!-- Kafka -> Flink -->
+          <line x1="885" y1="93" x2="885" y2="100"/>
+          <line x1="885" y1="132" x2="885" y2="140"/>
+          <line x1="885" y1="172" x2="885" y2="180"/>
+          <line x1="885" y1="212" x2="885" y2="220"/>
+          <!-- Kafka cluster -> Storage -->
+          <line x1="970" y1="74" x2="1048" y2="74"/>
+          <line x1="970" y1="119" x2="1048" y2="119"/>
+          <line x1="970" y1="159" x2="1048" y2="159"/>
+          <line x1="970" y1="204" x2="1048" y2="204"/>
+          <line x1="970" y1="249" x2="1048" y2="249"/>
+        </g>
+
+        <!-- bottom-row arrows: storage -> query -->
+        <g stroke="#525252" stroke-width="1.2" fill="none" marker-end="url(#arr3)" stroke-dasharray="4 3">
+          <line x1="1145" y1="278" x2="1145" y2="335"/>
+          <line x1="1145" y1="335" x2="120" y2="335"/>
+          <line x1="120" y1="335" x2="120" y2="363"/>
+          <line x1="220" y1="387" x2="238" y2="387"/>
+          <line x1="440" y1="387" x2="458" y2="387"/>
+          <line x1="660" y1="387" x2="678" y2="387"/>
+        </g>
+
+        <!-- query -> consumers -->
+        <g stroke="#0f62fe" stroke-width="1.2" fill="none" marker-end="url(#arr2)">
+          <line x1="120" y1="409" x2="120" y2="458"/>
+          <line x1="340" y1="409" x2="340" y2="458"/>
+          <line x1="560" y1="409" x2="560" y2="458"/>
+          <line x1="780" y1="409" x2="780" y2="458"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="mt-6 grid md:grid-cols-3 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80">
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">Why Apache NiFi at the center?</div>
+        <p class="text-sm text-ibm-gray70 dark:text-ibm-gray30">NiFi gives a visual, auditable, drag-and-drop dataflow with built-in back-pressure, provenance, and 300+ processors. Connectors defined as YAML in this UI compile down to NiFi process groups. Schema validation, enrichment, masking, and routing all happen here before anything hits Kafka.</p>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">Why Kafka + Flink?</div>
+        <p class="text-sm text-ibm-gray70 dark:text-ibm-gray30">Kafka is the durable, replayable bus — every downstream system (storage, alerts, AI) is a consumer. Flink reads from Kafka to compute windowed metrics, sessions, and anomaly scores, writing results back to a metrics topic that fans out to TimescaleDB and the dashboard.</p>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">Why polyglot storage?</div>
+        <p class="text-sm text-ibm-gray70 dark:text-ibm-gray30">No single store is good at everything. Elasticsearch for fast text search, ClickHouse for analytics over billions of rows, S3 + Iceberg for cheap long-term retention with query, Redis for hot counters, TimescaleDB for metrics. The query API hides this from callers.</p>
+      </div>
+    </div>
+
+    <div class="mt-4 flex flex-wrap gap-2 text-xs">
+      <button class="px-3 py-1.5 border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-blue hover:text-white hover:border-ibm-blue transition" onclick="openExplain('nifi')">Explain NiFi's role →</button>
+      <button class="px-3 py-1.5 border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-blue hover:text-white hover:border-ibm-blue transition" onclick="openExplain('storage')">Hot vs cold storage?</button>
+      <button class="px-3 py-1.5 border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-blue hover:text-white hover:border-ibm-blue transition" onclick="openExplain('rag')">How does the AI use this?</button>
+    </div>
+  </div>
+</section>
+
+<!-- AI ASSISTANT -->
+<section id="ai-assistant" class="border-b border-ibm-gray20 dark:border-ibm-gray80">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
+    <div class="mb-8">
+      <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue mb-2">§ 08 — AI Assistant</div>
+      <h2 class="text-2xl sm:text-3xl font-light">Ask anything about your data</h2>
+      <p class="mt-3 text-sm text-ibm-gray70 dark:text-ibm-gray30 max-w-3xl">In production, this assistant runs over your indexed events using RAG (retrieval over Elasticsearch + vector store) and a guard-railed LLM. Here, it's a static pattern-matched simulation — try the suggested prompts or type your own.</p>
+    </div>
+
+    <div class="grid lg:grid-cols-4 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80">
+      <!-- Suggested prompts -->
+      <aside class="lg:col-span-1 bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30 mb-3">Try a prompt</div>
+        <div id="suggestedPrompts" class="space-y-2"></div>
+        <div class="mt-6 pt-4 border-t border-ibm-gray20 dark:border-ibm-gray80">
+          <button onclick="clearChat()" class="text-xs font-mono text-ibm-red hover:underline">Clear chat history</button>
+        </div>
+      </aside>
+
+      <!-- Chat panel -->
+      <div class="lg:col-span-3 bg-white dark:bg-ibm-gray100 flex flex-col" style="min-height: 520px;">
+        <div class="px-5 py-3 border-b border-ibm-gray20 dark:border-ibm-gray80 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-ibm-green live-dot"></span>
+            <span class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30">NimbusPulse Assistant</span>
+            <span class="text-xs font-mono text-ibm-gray50">· simulated</span>
+          </div>
+          <span class="text-xs font-mono text-ibm-gray50">RAG · LLM</span>
+        </div>
+        <div id="chatLog" class="flex-1 overflow-y-auto p-5 space-y-4" style="max-height: 460px;"></div>
+        <form id="chatForm" class="border-t border-ibm-gray20 dark:border-ibm-gray80 p-3 flex gap-2">
+          <input id="chatInput" type="text" placeholder="Ask about errors, security events, slowdowns, or a specific log…" class="flex-1 px-3 py-2 text-sm bg-transparent border border-ibm-gray30 dark:border-ibm-gray70 focus:border-ibm-blue focus:ring-0" autocomplete="off"/>
+          <button type="submit" class="px-4 py-2 bg-ibm-blue text-white text-sm font-medium hover:bg-ibm-blue70 transition">Send →</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="border-t border-ibm-gray20 dark:border-ibm-gray80 bg-ibm-gray10/40 dark:bg-ibm-gray100">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col sm:flex-row justify-between gap-4 text-xs text-ibm-gray70 dark:text-ibm-gray30">
+    <div class="font-mono">NimbusPulse · v1.0.0 · Simulation only — no real data leaves your browser.</div>
+    <div class="font-mono">Built with HTML · Tailwind · vanilla JS · localStorage · SVG</div>
+  </div>
+</footer>
+
+</main>
+
+<!-- ============== MODAL ============== -->
+<div id="modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 modal-enter" role="dialog" aria-modal="true">
+  <div class="absolute inset-0 bg-ibm-gray100/70 backdrop-blur-sm" onclick="closeModal()"></div>
+  <div class="relative bg-white dark:bg-ibm-gray90 border border-ibm-gray20 dark:border-ibm-gray80 max-w-2xl w-full max-h-[85vh] overflow-y-auto">
+    <div class="px-5 py-3 border-b border-ibm-gray20 dark:border-ibm-gray80 flex items-center justify-between sticky top-0 bg-white dark:bg-ibm-gray90">
+      <h3 id="modalTitle" class="font-medium text-sm">—</h3>
+      <button onclick="closeModal()" class="text-ibm-gray70 dark:text-ibm-gray30 hover:text-ibm-blue text-xl leading-none">×</button>
+    </div>
+    <div id="modalBody" class="p-5 text-sm"></div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" class="fixed bottom-5 right-5 z-50 hidden bg-ibm-gray100 text-white text-sm font-mono px-4 py-3 shadow-lg border-l-4 border-ibm-blue"></div>
+
+<script>
+/* ============================================================
+ * NimbusPulse — Simulation Logic
+ * All data is static / generated; persistence via localStorage.
+ * ============================================================ */
+
+// ---------- THEME ----------
+(function initTheme(){
+  const saved = localStorage.getItem('np_theme');
+  if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+    document.documentElement.classList.add('dark');
+  }
+})();
+document.getElementById('themeToggle').addEventListener('click', () => {
+  document.documentElement.classList.toggle('dark');
+  localStorage.setItem('np_theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+});
+
+// ---------- DATA: BUILT-IN CONNECTORS ----------
+const BUILT_IN_CONNECTORS = [
+  { id:'aws-cloudwatch', name:'AWS CloudWatch Logs', category:'Cloud', protocol:'pull', icon:'☁', color:'#ff832b', schedule:'*/1 * * * *', schema:{ timestamp:'iso8601', logGroup:'string', logStream:'string', message:'string' }, enabled:true },
+  { id:'aws-cloudtrail',  name:'AWS CloudTrail',      category:'Cloud', protocol:'pull', icon:'☁', color:'#ff832b', schedule:'*/5 * * * *', schema:{ eventTime:'iso8601', eventSource:'string', eventName:'string', userIdentity:'object' }, enabled:true },
+  { id:'aws-s3-access',   name:'AWS S3 Access Logs',  category:'Cloud', protocol:'pull', icon:'☁', color:'#ff832b', schedule:'*/10 * * * *', schema:{ time:'iso8601', requester:'string', bucket:'string', operation:'string', httpStatus:'int' }, enabled:true },
+  { id:'azure-monitor',   name:'Azure Monitor',       category:'Cloud', protocol:'pull', icon:'A', color:'#0089d6', schedule:'*/1 * * * *', schema:{ TimeGenerated:'iso8601', ResourceId:'string', OperationName:'string', ResultType:'string' }, enabled:true },
+  { id:'azure-appinsights', name:'Azure App Insights', category:'Cloud', protocol:'pull', icon:'A', color:'#0089d6', schedule:'*/2 * * * *', schema:{ timestamp:'iso8601', operation_Name:'string', success:'bool', duration:'float' }, enabled:false },
+  { id:'gcp-logging',     name:'GCP Cloud Logging',   category:'Cloud', protocol:'pull', icon:'G', color:'#1192e8', schedule:'*/1 * * * *', schema:{ timestamp:'iso8601', resource:'object', severity:'string', textPayload:'string' }, enabled:true },
+  { id:'k8s-events',      name:'Kubernetes Events',   category:'Platform', protocol:'grpc', icon:'⎈', color:'#8a3ffc', schedule:'realtime', schema:{ involvedObject:'object', reason:'string', message:'string', type:'string' }, enabled:true },
+  { id:'k8s-pod-logs',    name:'Kubernetes Pod Logs', category:'Platform', protocol:'grpc', icon:'⎈', color:'#8a3ffc', schedule:'realtime', schema:{ pod:'string', container:'string', namespace:'string', log:'string' }, enabled:true },
+  { id:'syslog',          name:'Syslog (RFC 5424)',   category:'System', protocol:'udp/tcp', icon:'🖥', color:'#ee5396', schedule:'realtime', schema:{ priority:'int', host:'string', appName:'string', message:'string' }, enabled:true },
+  { id:'app-status',      name:'Application Health',  category:'System', protocol:'rest', icon:'❤', color:'#24a148', schedule:'*/30 * * * * *', schema:{ service:'string', status:'enum', uptime:'int', version:'string' }, enabled:true },
+  { id:'security-siem',   name:'Security / SIEM',     category:'Security', protocol:'rest', icon:'🛡', color:'#da1e28', schedule:'realtime', schema:{ alertId:'string', severity:'enum', category:'string', srcIp:'ip', dstIp:'ip' }, enabled:true },
+  { id:'auth-logs',       name:'Auth / SSO Logs',     category:'Security', protocol:'rest', icon:'🔑', color:'#da1e28', schedule:'realtime', schema:{ user:'string', action:'enum', result:'enum', ip:'ip' }, enabled:true },
+  { id:'waf',             name:'WAF / Firewall',      category:'Security', protocol:'kafka', icon:'🔥', color:'#da1e28', schedule:'realtime', schema:{ rule:'string', action:'enum', srcIp:'ip', uri:'string' }, enabled:true },
+  { id:'nginx',           name:'Nginx Access Logs',   category:'Web', protocol:'tail', icon:'🌐', color:'#009d9a', schedule:'realtime', schema:{ remoteAddr:'ip', request:'string', status:'int', bytes:'int', userAgent:'string' }, enabled:true },
+  { id:'apache',          name:'Apache HTTPD',        category:'Web', protocol:'tail', icon:'🌐', color:'#009d9a', schedule:'realtime', schema:{ host:'string', request:'string', status:'int', referer:'string' }, enabled:false },
+  { id:'postgres',        name:'PostgreSQL Logs',     category:'Database', protocol:'tail', icon:'🐘', color:'#0043ce', schedule:'realtime', schema:{ ts:'iso8601', user:'string', db:'string', sql:'string', duration:'float' }, enabled:true },
+  { id:'mysql',           name:'MySQL Slow Query',    category:'Database', protocol:'tail', icon:'🐬', color:'#0043ce', schedule:'realtime', schema:{ ts:'iso8601', user:'string', sql:'string', execTime:'float' }, enabled:false },
+  { id:'docker',          name:'Docker Container',    category:'Platform', protocol:'unix-socket', icon:'🐳', color:'#1192e8', schedule:'realtime', schema:{ containerId:'string', image:'string', stream:'enum', log:'string' }, enabled:true },
+  { id:'webhook',         name:'Generic Webhook',     category:'Custom', protocol:'rest', icon:'⚡', color:'#525252', schedule:'realtime', schema:{ payload:'object' }, enabled:true },
+  { id:'kafka-stream',    name:'Kafka Topic',         category:'Custom', protocol:'kafka', icon:'⚡', color:'#525252', schedule:'realtime', schema:{ key:'string', value:'object', topic:'string' }, enabled:true },
+  { id:'ws-feed',         name:'WebSocket Feed',      category:'Custom', protocol:'websocket', icon:'⚡', color:'#525252', schedule:'realtime', schema:{ msg:'object' }, enabled:false },
+  { id:'cdn',             name:'CDN / Edge Logs',     category:'Web', protocol:'pull', icon:'🌍', color:'#009d9a', schedule:'*/5 * * * *', schema:{ time:'iso8601', edge:'string', uri:'string', status:'int', cacheHit:'bool' }, enabled:true }
+];
+
+// ---------- DATA: EVENT TEMPLATES ----------
+// Each source produces realistic-looking events. Templates are drawn at random.
+const EVENT_TEMPLATES = {
+  'aws-cloudwatch': [
+    { sev:'INFO',  msg:'Lambda function api-gateway-handler completed in 234ms', payload:()=>({ functionName:'api-gateway-handler', duration:randInt(80,400), memoryUsed:randInt(64,256), requestId:uuid() }) },
+    { sev:'ERROR', msg:'Lambda function payment-processor exited with error', payload:()=>({ functionName:'payment-processor', errorType:'TimeoutError', duration:30000, requestId:uuid() }) },
+    { sev:'WARN',  msg:'CloudWatch alarm "HighCPU-prod-api" triggered', payload:()=>({ alarm:'HighCPU-prod-api', threshold:80, currentValue:randInt(81,95), region:'us-east-1' }) }
+  ],
+  'aws-cloudtrail': [
+    { sev:'INFO',  msg:'ConsoleLogin succeeded for user devops@example.com', payload:()=>({ user:'devops@example.com', sourceIPAddress:fakeIp(), userAgent:'Mozilla/5.0', mfaUsed:true }) },
+    { sev:'WARN',  msg:'IAM policy modified: AdminAccess attached to role build-ci', payload:()=>({ user:'admin', resource:'role/build-ci', policy:'AdminAccess', action:'AttachRolePolicy' }) },
+    { sev:'CRITICAL', msg:'Root account API call detected from new IP', payload:()=>({ user:'root', sourceIPAddress:fakeIp(), eventName:'GetCallerIdentity' }) }
+  ],
+  'aws-s3-access': [
+    { sev:'INFO',  msg:'GET /assets/img/logo.svg → 200', payload:()=>({ bucket:'prod-assets', key:'img/logo.svg', status:200, bytes:4823 }) },
+    { sev:'WARN',  msg:'AccessDenied on s3://prod-backups/db-snapshot-2026.tar', payload:()=>({ bucket:'prod-backups', key:'db-snapshot-2026.tar', status:403, requester:'arn:aws:iam::123:user/intern' }) }
+  ],
+  'azure-monitor': [
+    { sev:'INFO',  msg:'VM web-prod-03 scale event completed', payload:()=>({ resource:'web-prod-03', operation:'ScaleSet/Update', status:'Succeeded' }) },
+    { sev:'ERROR', msg:'AppService web-app-checkout returned 5xx burst', payload:()=>({ resource:'web-app-checkout', http5xx:randInt(20,80), window:'5m' }) }
+  ],
+  'azure-appinsights': [
+    { sev:'WARN',  msg:'Operation /api/checkout slow: p95=2.4s', payload:()=>({ operation:'/api/checkout', p95:2400, p99:4100, samples:1240 }) }
+  ],
+  'gcp-logging': [
+    { sev:'INFO',  msg:'GKE node pool default-pool autoscaled +2', payload:()=>({ cluster:'prod-gke', nodePool:'default-pool', from:6, to:8 }) },
+    { sev:'ERROR', msg:'Cloud Run service order-svc revision failed health', payload:()=>({ service:'order-svc', revision:'order-svc-00042-abc', reason:'HealthCheckFailed' }) }
+  ],
+  'k8s-events': [
+    { sev:'WARN',  msg:'Pod checkout-api-7f8d crashed (OOMKilled)', payload:()=>({ pod:'checkout-api-7f8d', namespace:'prod', reason:'OOMKilled', exitCode:137, restartCount:randInt(1,5) }) },
+    { sev:'INFO',  msg:'Deployment user-svc rolled out successfully', payload:()=>({ deployment:'user-svc', namespace:'prod', replicas:6, readyReplicas:6 }) },
+    { sev:'ERROR', msg:'ImagePullBackOff: image registry timeout', payload:()=>({ pod:'reports-job-x21', namespace:'analytics', image:'gcr.io/co/reports:v2.3.1', reason:'ImagePullBackOff' }) }
+  ],
+  'k8s-pod-logs': [
+    { sev:'ERROR', msg:'Unhandled rejection: ECONNREFUSED 10.0.4.22:6379 (redis)', payload:()=>({ pod:'cart-api-3', container:'app', namespace:'prod', error:'ECONNREFUSED' }) },
+    { sev:'INFO',  msg:'GET /health 200 4ms', payload:()=>({ pod:'cart-api-3', method:'GET', path:'/health', status:200, latencyMs:4 }) }
+  ],
+  'syslog': [
+    { sev:'WARN',  msg:'sshd: Failed password for invalid user admin from 203.0.113.42', payload:()=>({ facility:'auth', host:'bastion-01', srcIp:fakeIp(), user:'admin' }) },
+    { sev:'INFO',  msg:'systemd: Started Daily apt activities', payload:()=>({ facility:'daemon', host:'web-prod-03' }) }
+  ],
+  'app-status': [
+    { sev:'INFO',  msg:'Service checkout-api healthy (uptime 18d 4h)', payload:()=>({ service:'checkout-api', status:'healthy', uptime:1574400, version:'v2.8.1' }) },
+    { sev:'CRITICAL', msg:'Service payment-gateway DOWN', payload:()=>({ service:'payment-gateway', status:'down', lastSeen:new Date(Date.now()-90000).toISOString() }) }
+  ],
+  'security-siem': [
+    { sev:'CRITICAL', msg:'Possible credential stuffing: 412 failed logins from /16', payload:()=>({ srcSubnet:'203.0.113.0/16', failedAttempts:randInt(300,800), targetUsers:randInt(40,120), window:'10m' }) },
+    { sev:'ERROR',  msg:'Malware signature detected on file upload', payload:()=>({ user:'guest', file:'invoice.exe', signature:'Trojan.Win32.Generic', action:'quarantined' }) }
+  ],
+  'auth-logs': [
+    { sev:'INFO',  msg:'SSO login success: jane.doe@example.com', payload:()=>({ user:'jane.doe@example.com', ip:fakeIp(), mfa:true, provider:'okta' }) },
+    { sev:'WARN',  msg:'SSO login failed: wrong password', payload:()=>({ user:'mark.smith@example.com', ip:fakeIp(), reason:'invalid_credentials' }) }
+  ],
+  'waf': [
+    { sev:'WARN',  msg:'WAF blocked SQLi attempt on /api/search', payload:()=>({ rule:'SQLI-001', action:'block', srcIp:fakeIp(), uri:'/api/search?q=1%27%20OR%201%3D1' }) }
+  ],
+  'nginx': [
+    { sev:'INFO',  msg:'GET /api/v1/products 200 142ms', payload:()=>({ remoteAddr:fakeIp(), request:'GET /api/v1/products', status:200, bytes:randInt(1000,40000) }) },
+    { sev:'WARN',  msg:'GET /api/v1/orders 502 0ms (upstream down)', payload:()=>({ remoteAddr:fakeIp(), request:'GET /api/v1/orders', status:502 }) }
+  ],
+  'apache': [{ sev:'INFO', msg:'GET /index.html 200', payload:()=>({ status:200 }) }],
+  'postgres': [
+    { sev:'WARN',  msg:'Slow query: SELECT * FROM orders WHERE… (8.2s)', payload:()=>({ db:'prod', sql:'SELECT * FROM orders WHERE created_at > $1', duration:randFloat(2,10), user:'app_ro' }) }
+  ],
+  'mysql': [{ sev:'WARN', msg:'Slow query 3.4s', payload:()=>({ execTime:3.4 }) }],
+  'docker': [{ sev:'INFO', msg:'Container restarted: api-v2 (image refresh)', payload:()=>({ containerId:fakeId(12), image:'api-v2:latest', stream:'stderr' }) }],
+  'webhook': [{ sev:'INFO', msg:'Webhook received from github: push event', payload:()=>({ source:'github', event:'push', repo:'co/api', ref:'refs/heads/main' }) }],
+  'kafka-stream': [{ sev:'INFO', msg:'Kafka topic orders.created msg consumed', payload:()=>({ topic:'orders.created', key:'order-'+fakeId(6), offset:randInt(100000,999999) }) }],
+  'ws-feed': [{ sev:'INFO', msg:'WebSocket frame received', payload:()=>({ msg:'price.tick' }) }],
+  'cdn': [
+    { sev:'INFO',  msg:'EDGE-IAD GET /static/main.css 200 (cache HIT)', payload:()=>({ edge:'IAD', uri:'/static/main.css', status:200, cacheHit:true }) },
+    { sev:'WARN',  msg:'EDGE-FRA GET /api/quote 504 (origin timeout)', payload:()=>({ edge:'FRA', uri:'/api/quote', status:504, cacheHit:false }) }
+  ]
+};
+
+// ---------- HELPERS ----------
+function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
+function randFloat(a,b){ return +(Math.random()*(b-a)+a).toFixed(2); }
+function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+function uuid(){ return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c => (c^crypto.getRandomValues(new Uint8Array(1))[0]&15>>c/4).toString(16)); }
+function fakeIp(){ return [randInt(1,223), randInt(0,255), randInt(0,255), randInt(0,254)].join('.'); }
+function fakeId(n){ const s='abcdef0123456789'; let r=''; for(let i=0;i<n;i++) r+=s[randInt(0,15)]; return r; }
+function fmtTime(d){ return d.toTimeString().slice(0,8); }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+const SEV_STYLE = {
+  DEBUG:    { bg:'bg-ibm-gray20 dark:bg-ibm-gray80', fg:'text-ibm-gray70 dark:text-ibm-gray30' },
+  INFO:     { bg:'bg-ibm-blue20 dark:bg-ibm-blue80', fg:'text-ibm-blue80 dark:text-ibm-blue20' },
+  WARN:     { bg:'bg-yellow-100 dark:bg-yellow-900/40', fg:'text-yellow-800 dark:text-yellow-200' },
+  ERROR:    { bg:'bg-red-100 dark:bg-red-900/40', fg:'text-red-800 dark:text-red-200' },
+  CRITICAL: { bg:'bg-ibm-red', fg:'text-white' }
+};
+
+// ---------- STATE ----------
+function loadCustom(){ try { return JSON.parse(localStorage.getItem('np_custom_connectors')||'[]'); } catch(e){ return []; } }
+function saveCustom(arr){ localStorage.setItem('np_custom_connectors', JSON.stringify(arr)); }
+function loadDisabled(){ try { return JSON.parse(localStorage.getItem('np_disabled')||'[]'); } catch(e){ return []; } }
+function saveDisabled(arr){ localStorage.setItem('np_disabled', JSON.stringify(arr)); }
+
+function getAllConnectors(){
+  const disabled = new Set(loadDisabled());
+  const custom = loadCustom().map(c => ({...c, custom:true}));
+  return [...BUILT_IN_CONNECTORS, ...custom].map(c => ({
+    ...c,
+    enabled: disabled.has(c.id) ? false : (c.enabled !== false)
+  }));
+}
+
+const STATE = {
+  events: [],            // rolling, max 250
+  throughput: new Array(60).fill(0),
+  sevCounts: { DEBUG:0, INFO:0, WARN:0, ERROR:0, CRITICAL:0 },
+  paused: false,
+  totalEvents: 0,
+  totalErrors: 0,
+  chat: []
+};
+
+// ---------- CONNECTORS RENDER ----------
+function renderConnectors(){
+  const grid = document.getElementById('connectorGrid');
+  const all = getAllConnectors();
+  const disabled = new Set(loadDisabled());
+  grid.innerHTML = all.map(c => `
+    <div class="bg-white dark:bg-ibm-gray100 p-4 group">
+      <div class="flex items-start justify-between mb-3">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 flex items-center justify-center text-white text-sm font-semibold" style="background:${c.color}">${c.icon}</div>
+          <div class="leading-tight">
+            <div class="text-sm font-medium">${escapeHtml(c.name)}</div>
+            <div class="text-[10px] font-mono uppercase tracking-wider text-ibm-gray50">${escapeHtml(c.category)} · ${escapeHtml(c.protocol)}</div>
+          </div>
+        </div>
+        ${c.custom ? '<span class="chip bg-ibm-purple text-white">CUSTOM</span>' : ''}
+      </div>
+      <div class="text-[11px] font-mono text-ibm-gray70 dark:text-ibm-gray30 mb-3 truncate">${escapeHtml(c.schedule)}</div>
+      <div class="flex items-center justify-between gap-2 mt-2">
+        <span class="chip ${c.enabled ? 'bg-ibm-green text-white' : 'bg-ibm-gray30 text-ibm-gray80'}">${c.enabled ? '● ACTIVE' : '○ PAUSED'}</span>
+        <div class="flex gap-1">
+          <button onclick="toggleConnector('${c.id}')" class="text-[11px] font-mono px-2 py-1 border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">${c.enabled ? 'pause' : 'start'}</button>
+          <button onclick="inspectConnector('${c.id}')" class="text-[11px] font-mono px-2 py-1 border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">inspect</button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+  // refresh source filter dropdown
+  const sel = document.getElementById('eventSrcFilter');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">All sources</option>' + all.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  sel.value = cur;
+}
+
+function toggleConnector(id){
+  const disabled = new Set(loadDisabled());
+  const all = getAllConnectors();
+  const conn = all.find(c => c.id === id);
+  if (!conn) return;
+  if (conn.enabled) disabled.add(id); else disabled.delete(id);
+  saveDisabled([...disabled]);
+  renderConnectors();
+  toast(`${conn.name} ${conn.enabled ? 'paused' : 'started'}`);
+}
+
+function inspectConnector(id){
+  const c = getAllConnectors().find(x => x.id === id);
+  if (!c) return;
+  openModal(c.name, `
+    <div class="space-y-4">
+      <div>
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30 mb-1">Details</div>
+        <table class="w-full text-xs font-mono">
+          <tr class="border-b border-ibm-gray20 dark:border-ibm-gray80"><td class="py-1.5 text-ibm-gray70 dark:text-ibm-gray30 pr-4">id</td><td>${escapeHtml(c.id)}</td></tr>
+          <tr class="border-b border-ibm-gray20 dark:border-ibm-gray80"><td class="py-1.5 text-ibm-gray70 dark:text-ibm-gray30 pr-4">category</td><td>${escapeHtml(c.category)}</td></tr>
+          <tr class="border-b border-ibm-gray20 dark:border-ibm-gray80"><td class="py-1.5 text-ibm-gray70 dark:text-ibm-gray30 pr-4">protocol</td><td>${escapeHtml(c.protocol)}</td></tr>
+          <tr class="border-b border-ibm-gray20 dark:border-ibm-gray80"><td class="py-1.5 text-ibm-gray70 dark:text-ibm-gray30 pr-4">schedule</td><td>${escapeHtml(c.schedule)}</td></tr>
+          <tr><td class="py-1.5 text-ibm-gray70 dark:text-ibm-gray30 pr-4">status</td><td>${c.enabled ? '<span class="text-ibm-green">active</span>' : '<span class="text-ibm-gray70">paused</span>'}</td></tr>
+        </table>
+      </div>
+      <div>
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30 mb-1">Event schema</div>
+        <pre class="bg-ibm-gray10 dark:bg-ibm-gray90 p-3 text-xs font-mono overflow-x-auto">${escapeHtml(JSON.stringify(c.schema, null, 2))}</pre>
+      </div>
+      <div>
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30 mb-1">What it does in production</div>
+        <p class="text-sm text-ibm-gray70 dark:text-ibm-gray30">Apache NiFi runs a corresponding process group: <code class="font-mono text-ibm-blue">${escapeHtml(c.protocol)}</code> listener → schema validate against the shape above → enrich with geo/user/trace → mask PII → publish to <code class="font-mono text-ibm-blue">topic.events.${escapeHtml(c.category.toLowerCase())}</code>.</p>
+      </div>
+      <div class="flex gap-2 pt-2">
+        <button onclick="toggleConnector('${c.id}'); closeModal();" class="px-4 py-2 text-xs font-mono bg-ibm-blue text-white hover:bg-ibm-blue70 transition">${c.enabled ? 'Pause connector' : 'Start connector'}</button>
+        <button onclick="askAI('Explain what the ${c.name} connector does and what its events typically mean'); closeModal(); document.getElementById('ai-assistant').scrollIntoView();" class="px-4 py-2 text-xs font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Ask AI →</button>
+      </div>
+    </div>
+  `);
+}
+
+// ---------- CUSTOM CONNECTOR INPUT ----------
+const SAMPLE_JSON = `{
+  "id": "stripe-webhook",
+  "name": "Stripe Payment Webhook",
+  "category": "Custom",
+  "protocol": "rest",
+  "icon": "$",
+  "color": "#635bff",
+  "schedule": "realtime",
+  "schema": {
+    "id": "string",
+    "type": "string",
+    "created": "unix_ts",
+    "data": "object"
+  }
+}`;
+const SAMPLE_YAML = `id: stripe-webhook
+name: Stripe Payment Webhook
+category: Custom
+protocol: rest
+icon: $
+color: '#635bff'
+schedule: realtime
+schema:
+  id: string
+  type: string
+  created: unix_ts
+  data: object`;
+
+function loadSample(kind){
+  document.getElementById('connectorInput').value = kind === 'yaml' ? SAMPLE_YAML : SAMPLE_JSON;
+  document.getElementById('schemaFormat').textContent = kind.toUpperCase();
+  document.getElementById('validationOut').innerHTML = '<span class="text-ibm-gray70 dark:text-ibm-gray30">Sample loaded. Click <b>Validate</b>.</span>';
+}
+
+// Minimal YAML parser (flat keys + nested 1-level map, sufficient for connector schemas)
+function parseYaml(str){
+  const out = {}; const lines = str.split(/\r?\n/);
+  let current = out; const stack = [out]; let lastIndent = 0;
+  for (const raw of lines){
+    if (!raw.trim() || raw.trim().startsWith('#')) continue;
+    const indent = raw.match(/^(\s*)/)[1].length;
+    const line = raw.trim();
+    const m = line.match(/^([\w.\-]+)\s*:\s*(.*)$/);
+    if (!m) throw new Error('YAML parse error near: '+line);
+    const [, key, val] = m;
+    if (indent === 0){
+      if (val === ''){ const obj = {}; out[key] = obj; current = obj; stack.length=1; stack.push(obj); lastIndent=0; }
+      else { out[key] = coerce(val); current = out; stack.length=1; lastIndent=0; }
+    } else {
+      const parent = stack[stack.length-1];
+      if (val === ''){ const obj = {}; parent[key] = obj; stack.push(obj); }
+      else { parent[key] = coerce(val); }
+    }
+  }
+  return out;
+  function coerce(v){ v=v.trim(); if((v.startsWith("'")&&v.endsWith("'"))||(v.startsWith('"')&&v.endsWith('"'))) return v.slice(1,-1); if(v==='true')return true; if(v==='false')return false; if(/^-?\d+$/.test(v))return +v; if(/^-?\d*\.\d+$/.test(v))return +v; return v; }
+}
+
+function validateConnector(){
+  const raw = document.getElementById('connectorInput').value.trim();
+  const out = document.getElementById('validationOut');
+  if (!raw){ out.innerHTML = '<span class="text-ibm-red">✗ empty input</span>'; return null; }
+  let parsed, fmt;
+  try {
+    if (raw.startsWith('{') || raw.startsWith('[')){ parsed = JSON.parse(raw); fmt='JSON'; }
+    else { parsed = parseYaml(raw); fmt='YAML'; }
+  } catch(e){ out.innerHTML = `<span class="text-ibm-red">✗ parse error: ${escapeHtml(e.message)}</span>`; return null; }
+  document.getElementById('schemaFormat').textContent = fmt;
+  const required = ['id','name','category','protocol','schema'];
+  const missing = required.filter(k => !(k in parsed));
+  const lines = [];
+  lines.push(`<div><span class="text-ibm-green">✓</span> parsed as <b>${fmt}</b></div>`);
+  required.forEach(k => {
+    if (k in parsed) lines.push(`<div><span class="text-ibm-green">✓</span> ${k}: <span class="text-ibm-blue">${escapeHtml(typeof parsed[k]==='object' ? '{…}' : String(parsed[k]))}</span></div>`);
+    else lines.push(`<div><span class="text-ibm-red">✗</span> missing required: ${k}</div>`);
+  });
+  if (parsed.schema && typeof parsed.schema === 'object'){
+    const fields = Object.keys(parsed.schema);
+    lines.push(`<div><span class="text-ibm-green">✓</span> schema fields: <span class="text-ibm-blue">${fields.length}</span> (${fields.slice(0,4).map(escapeHtml).join(', ')}${fields.length>4?'…':''})</div>`);
+  }
+  out.innerHTML = lines.join('');
+  return missing.length === 0 ? parsed : null;
+}
+
+function saveConnector(){
+  const parsed = validateConnector();
+  if (!parsed){ toast('Fix validation errors first'); return; }
+  parsed.icon = parsed.icon || '✦';
+  parsed.color = parsed.color || '#8a3ffc';
+  parsed.schedule = parsed.schedule || 'realtime';
+  parsed.enabled = parsed.enabled !== false;
+  const custom = loadCustom();
+  // de-dupe by id
+  const idx = custom.findIndex(c => c.id === parsed.id);
+  if (idx >= 0) custom[idx] = parsed; else custom.push(parsed);
+  saveCustom(custom);
+  renderConnectors();
+  toast(`Connector "${parsed.name}" saved → localStorage`);
+}
+
+function clearCustomConnectors(){
+  if (!confirm('Remove all custom connectors from localStorage?')) return;
+  localStorage.removeItem('np_custom_connectors');
+  renderConnectors();
+  toast('All custom connectors cleared');
+}
+
+// ---------- SIMULATION TICK ----------
+function generateEvent(){
+  const enabled = getAllConnectors().filter(c => c.enabled);
+  if (!enabled.length) return null;
+  const conn = pick(enabled);
+  const templates = EVENT_TEMPLATES[conn.id] || [{ sev:'INFO', msg:`${conn.name} event received`, payload:()=>({ source:conn.id }) }];
+  const t = pick(templates);
+  // bias to INFO most of the time, occasional WARN/ERROR/CRITICAL
+  const roll = Math.random();
+  let sev = t.sev;
+  if (roll < 0.02) sev = 'CRITICAL';
+  else if (roll < 0.10) sev = 'ERROR';
+  else if (roll < 0.25) sev = 'WARN';
+  else if (sev === 'CRITICAL' || sev === 'ERROR') sev = t.sev;  // keep template's serious sev some of the time
+  return {
+    id: uuid(),
+    time: new Date(),
+    severity: sev,
+    source: conn.id,
+    sourceName: conn.name,
+    sourceColor: conn.color,
+    message: t.msg,
+    payload: t.payload(),
+    raw: `[${new Date().toISOString()}] ${sev} ${conn.id} ${t.msg}`
+  };
+}
+
+let simInterval = null;
+
+function tick(){
+  if (STATE.paused) return;
+  // Generate 1-5 events per tick
+  const n = randInt(1,5);
+  let tickCount = 0;
+  for (let i=0; i<n; i++){
+    const ev = generateEvent();
+    if (!ev) continue;
+    STATE.events.unshift(ev);
+    if (STATE.events.length > 250) STATE.events.pop();
+    STATE.totalEvents++;
+    if (ev.severity === 'ERROR' || ev.severity === 'CRITICAL') STATE.totalErrors++;
+    STATE.sevCounts[ev.severity] = (STATE.sevCounts[ev.severity]||0) + 1;
+    tickCount++;
+  }
+  // Throughput buffer (per 2-sec tick)
+  STATE.throughput.push(tickCount);
+  if (STATE.throughput.length > 60) STATE.throughput.shift();
+
+  renderEvents();
+  renderLogs();
+  renderKPIs(tickCount);
+  renderThroughputChart();
+  renderSeverityBars();
+}
+
+function startSim(){ if (!simInterval) simInterval = setInterval(tick, 2000); }
+function toggleSimulation(){
+  STATE.paused = !STATE.paused;
+  document.getElementById('simBtn').textContent = STATE.paused ? '▶ RESUME' : '⏸ PAUSE';
+  document.getElementById('simBtn').className = STATE.paused
+    ? 'px-3 py-2 text-xs font-mono bg-ibm-green text-white hover:opacity-90 transition'
+    : 'px-3 py-2 text-xs font-mono bg-ibm-blue text-white hover:bg-ibm-blue70 transition';
+}
+function resetSimulation(){
+  STATE.events = []; STATE.throughput = new Array(60).fill(0);
+  STATE.sevCounts = { DEBUG:0, INFO:0, WARN:0, ERROR:0, CRITICAL:0 };
+  STATE.totalEvents = 0; STATE.totalErrors = 0;
+  renderEvents(); renderLogs(); renderKPIs(0); renderThroughputChart(); renderSeverityBars();
+  toast('Simulation reset');
+}
+
+// ---------- KPI / CHARTS ----------
+function renderKPIs(lastTick){
+  // events/sec: avg over last 10 ticks (each tick = 2s)
+  const slice = STATE.throughput.slice(-10);
+  const avgPerTick = slice.reduce((a,b)=>a+b,0) / Math.max(slice.length,1);
+  const eps = (avgPerTick / 2).toFixed(1);
+  document.getElementById('kpiEvents').textContent = eps;
+  document.getElementById('liveStatus').textContent = `LIVE — ${eps} ev/s`;
+
+  const errPct = STATE.totalEvents ? ((STATE.totalErrors / STATE.totalEvents) * 100) : 0;
+  document.getElementById('kpiError').textContent = errPct.toFixed(2) + '%';
+  const slo = errPct > 1.0;
+  document.getElementById('kpiErrorDelta').innerHTML = slo
+    ? '<span class="text-ibm-red">⚠ over SLO</span>' : '<span class="text-ibm-green">under SLO</span>';
+  document.getElementById('kpiError').className = 'font-mono text-3xl font-semibold ' + (slo ? 'text-ibm-red' : 'text-ibm-green');
+
+  const all = getAllConnectors();
+  const active = all.filter(c => c.enabled).length;
+  document.getElementById('kpiSources').textContent = active;
+  document.getElementById('kpiSourcesTotal').textContent = `of ${all.length}`;
+
+  // estimate volume: ~250 bytes per event, gzip 0.35x
+  const bytesPerHour = avgPerTick * 30 * 60 * 250 * 0.35;
+  document.getElementById('kpiVolume').textContent = humanBytes(bytesPerHour);
+
+  // delta
+  const prev = STATE.throughput.slice(-20,-10).reduce((a,b)=>a+b,0) / 10 || 0.01;
+  const cur = avgPerTick || 0.01;
+  const d = ((cur - prev) / prev) * 100;
+  const el = document.getElementById('kpiEventsDelta');
+  el.textContent = (d >= 0 ? '+' : '') + d.toFixed(0) + '%';
+  el.className = d >= 0 ? 'text-ibm-green' : 'text-ibm-red';
+}
+
+function humanBytes(b){
+  if (b < 1024) return Math.round(b)+' B';
+  if (b < 1024*1024) return (b/1024).toFixed(1)+' KB';
+  if (b < 1024*1024*1024) return (b/1024/1024).toFixed(1)+' MB';
+  return (b/1024/1024/1024).toFixed(2)+' GB';
+}
+
+function renderThroughputChart(){
+  const svg = document.getElementById('throughputChart');
+  const w = 600, h = 180, pad = 20;
+  const data = STATE.throughput.slice(-60);
+  const max = Math.max(...data, 5);
+  const step = (w - pad*2) / Math.max(data.length-1, 1);
+  const points = data.map((v,i) => [pad + i*step, h - pad - (v/max)*(h-pad*2)]);
+  const path = points.map((p,i) => (i===0?'M':'L') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+  const area = path + ` L${(w-pad).toFixed(1)},${(h-pad).toFixed(1)} L${pad},${(h-pad).toFixed(1)} Z`;
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#0f62fe" stop-opacity="0.3"/>
+        <stop offset="100%" stop-color="#0f62fe" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <g stroke="currentColor" stroke-opacity="0.1" stroke-width="0.5">
+      ${[0,0.25,0.5,0.75,1].map(f => `<line x1="${pad}" y1="${pad+f*(h-pad*2)}" x2="${w-pad}" y2="${pad+f*(h-pad*2)}"/>`).join('')}
+    </g>
+    <path d="${area}" fill="url(#grad)"/>
+    <path d="${path}" stroke="#0f62fe" stroke-width="1.5" fill="none"/>
+    <g font-family="IBM Plex Mono" font-size="9" fill="currentColor" fill-opacity="0.5">
+      <text x="${pad}" y="14">${max} ev/tick</text>
+      <text x="${w-pad}" y="${h-4}" text-anchor="end">now</text>
+    </g>
+  `;
+}
+
+function renderSeverityBars(){
+  const total = Object.values(STATE.sevCounts).reduce((a,b)=>a+b,0) || 1;
+  const order = ['CRITICAL','ERROR','WARN','INFO','DEBUG'];
+  const colors = { CRITICAL:'bg-ibm-red', ERROR:'bg-ibm-orange', WARN:'bg-ibm-yellow', INFO:'bg-ibm-blue', DEBUG:'bg-ibm-gray50' };
+  document.getElementById('severityBars').innerHTML = order.map(sev => {
+    const c = STATE.sevCounts[sev] || 0;
+    const pct = (c/total)*100;
+    return `
+      <div>
+        <div class="flex justify-between text-[10px] font-mono mb-1">
+          <span class="text-ibm-gray70 dark:text-ibm-gray30">${sev}</span>
+          <span>${c}</span>
+        </div>
+        <div class="h-1.5 bg-ibm-gray10 dark:bg-ibm-gray80">
+          <div class="h-full ${colors[sev]}" style="width: ${pct.toFixed(1)}%"></div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ---------- EVENT STREAM RENDER ----------
+function renderEvents(){
+  const sevF = document.getElementById('eventSevFilter').value;
+  const srcF = document.getElementById('eventSrcFilter').value;
+  const filtered = STATE.events.filter(e =>
+    (!sevF || e.severity === sevF) && (!srcF || e.source === srcF)
+  ).slice(0, 80);
+  const html = filtered.map((e, i) => {
+    const st = SEV_STYLE[e.severity] || SEV_STYLE.INFO;
+    return `
+      <button onclick="openEvent('${e.id}')" class="${i===0?'row-new':''} w-full text-left grid grid-cols-12 gap-2 px-4 py-2 text-xs border-b border-ibm-gray20/60 dark:border-ibm-gray80/60 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">
+        <div class="col-span-2 sm:col-span-2 font-mono text-ibm-gray70 dark:text-ibm-gray30">${fmtTime(e.time)}</div>
+        <div class="col-span-1"><span class="chip ${st.bg} ${st.fg}">${e.severity}</span></div>
+        <div class="col-span-3 sm:col-span-2 truncate"><span class="inline-block w-2 h-2 mr-1.5" style="background:${e.sourceColor}"></span>${escapeHtml(e.sourceName)}</div>
+        <div class="col-span-6 sm:col-span-6 truncate font-mono">${escapeHtml(e.message)}</div>
+        <div class="hidden sm:block sm:col-span-1 text-right text-ibm-gray50">→</div>
+      </button>`;
+  }).join('');
+  document.getElementById('eventList').innerHTML = html || `<div class="p-8 text-center text-sm text-ibm-gray50 font-mono">No events. ${STATE.paused ? 'Simulation paused.' : 'Waiting…'}</div>`;
+}
+
+function findEvent(id){ return STATE.events.find(e => e.id === id); }
+
+function openEvent(id){
+  const e = findEvent(id); if (!e) return;
+  const st = SEV_STYLE[e.severity] || SEV_STYLE.INFO;
+  openModal(`Event · ${e.sourceName}`, `
+    <div class="space-y-4">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="chip ${st.bg} ${st.fg}">${e.severity}</span>
+        <span class="text-xs font-mono text-ibm-gray70 dark:text-ibm-gray30">${e.time.toISOString()}</span>
+        <span class="text-xs font-mono text-ibm-blue">${escapeHtml(e.source)}</span>
+      </div>
+      <div class="text-base">${escapeHtml(e.message)}</div>
+      <div>
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30 mb-1">Structured payload</div>
+        <pre class="bg-ibm-gray10 dark:bg-ibm-gray90 p-3 text-xs font-mono overflow-x-auto">${escapeHtml(JSON.stringify(e.payload, null, 2))}</pre>
+      </div>
+      <div>
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30 mb-1">Raw line</div>
+        <pre class="bg-ibm-gray10 dark:bg-ibm-gray90 p-3 text-xs font-mono overflow-x-auto">${escapeHtml(e.raw)}</pre>
+      </div>
+      <div>
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30 mb-2">Actions</div>
+        <div class="flex flex-wrap gap-2">
+          <button onclick="actionEvent('${e.id}','ack')" class="px-3 py-1.5 text-xs font-mono bg-ibm-blue text-white hover:bg-ibm-blue70 transition">Acknowledge</button>
+          <button onclick="actionEvent('${e.id}','investigate')" class="px-3 py-1.5 text-xs font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Investigate</button>
+          <button onclick="actionEvent('${e.id}','mute')" class="px-3 py-1.5 text-xs font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Mute source</button>
+          <button onclick="actionEvent('${e.id}','replay')" class="px-3 py-1.5 text-xs font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Replay</button>
+          <button onclick="explainEvent('${e.id}')" class="px-3 py-1.5 text-xs font-mono border-2 border-ibm-blue text-ibm-blue hover:bg-ibm-blue hover:text-white transition">✦ Explain with AI</button>
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+function actionEvent(id, action){
+  const e = findEvent(id); if (!e) return;
+  const labels = { ack:'Acknowledged', investigate:'Opened investigation', mute:'Muted source for 1h', replay:'Event replayed to pipeline' };
+  toast(`${labels[action]} · ${e.source}`);
+  closeModal();
+}
+
+function explainEvent(id){
+  const e = findEvent(id); if (!e) return;
+  const expl = buildEventExplanation(e);
+  openModal('AI Explanation · '+e.sourceName, `
+    <div class="space-y-4">
+      <div class="flex items-center gap-2 text-xs font-mono text-ibm-gray70 dark:text-ibm-gray30">
+        <span class="w-2 h-2 rounded-full bg-ibm-green live-dot"></span> Assistant · simulated · static
+      </div>
+      <div class="bg-ibm-blue10 dark:bg-ibm-blue80/20 border-l-4 border-ibm-blue p-4 text-sm leading-relaxed">${expl}</div>
+      <div class="flex gap-2">
+        <button onclick="askAI('Explain this event in more detail: ${escapeHtml(e.message).replace(/'/g,"\\'")}'); closeModal(); document.getElementById('ai-assistant').scrollIntoView();" class="px-3 py-1.5 text-xs font-mono bg-ibm-blue text-white hover:bg-ibm-blue70 transition">Open in AI chat →</button>
+      </div>
+    </div>
+  `);
+}
+
+function buildEventExplanation(e){
+  const sev = e.severity;
+  const src = e.sourceName;
+  const lines = [];
+  lines.push(`<b>What this is:</b> A ${sev} event from <i>${escapeHtml(src)}</i>.`);
+  // source-specific explanations
+  const id = e.source;
+  if (id === 'k8s-events' && /OOMKilled/.test(e.message)) {
+    lines.push(`<b>What it means:</b> The container exceeded its memory limit and Kubernetes killed it. The pod will restart, but if this keeps happening you'll see <code class="font-mono text-ibm-blue">CrashLoopBackOff</code>.`);
+    lines.push(`<b>Likely causes:</b> memory leak, undersized resource <code class="font-mono">limits.memory</code>, traffic spike, or large in-memory cache.`);
+    lines.push(`<b>What to do:</b> Check the pod's memory graph in the last hour. If the leak is gradual, capture a heap dump before next restart. Otherwise, raise the limit and add an HPA on memory.`);
+  } else if (id === 'security-siem' && /credential stuffing/i.test(e.message)) {
+    lines.push(`<b>What it means:</b> Many failed logins from related IPs — an attacker is trying leaked username/password pairs against your login endpoint.`);
+    lines.push(`<b>Likely causes:</b> a public credential leak referencing your customers, automated bot networks.`);
+    lines.push(`<b>What to do:</b> Block the source subnet at the WAF, force MFA re-enrollment on targeted accounts, rate-limit /login per IP, and run a password reset campaign for affected users.`);
+  } else if (id === 'aws-cloudtrail' && /Root account/i.test(e.message)) {
+    lines.push(`<b>What it means:</b> The AWS root account just made an API call from an IP we haven't seen before. The root account should almost never be used.`);
+    lines.push(`<b>What to do:</b> Page the on-call security engineer, freeze the access keys, and verify with the account owner out-of-band.`);
+  } else if (id === 'postgres' && /Slow query/i.test(e.message)) {
+    lines.push(`<b>What it means:</b> A query took longer than your slow-query threshold. Even one slow query can hold a connection and stall the pool.`);
+    lines.push(`<b>What to do:</b> EXPLAIN ANALYZE the statement. Look for sequential scans on large tables and missing indexes on the WHERE columns.`);
+  } else if (id === 'waf' && /SQLi/i.test(e.message)) {
+    lines.push(`<b>What it means:</b> The web application firewall matched a SQL injection signature on an incoming request. The request was blocked — no SQL ran.`);
+    lines.push(`<b>What to do:</b> Verify the rule isn't false-positive (legit queries with apostrophes can match). If real, check whether the endpoint uses parameterized queries.`);
+  } else if (sev === 'CRITICAL') {
+    lines.push(`<b>Why it matters:</b> CRITICAL events page on-call. They indicate user-visible impact or a security boundary breach.`);
+    lines.push(`<b>What to do:</b> Acknowledge, declare an incident if not already, and start a timeline.`);
+  } else if (sev === 'ERROR') {
+    lines.push(`<b>Why it matters:</b> ERRORs count against your error-budget SLO. A single ERROR may be transient — sustained ERRORs from the same source indicate a regression.`);
+    lines.push(`<b>What to do:</b> Group by source and stack trace; correlate with recent deploys.`);
+  } else {
+    lines.push(`<b>Why it matters:</b> ${sev}-level events are usually informational. They become interesting when their <i>rate</i> changes — a sudden spike or a sudden silence.`);
+    lines.push(`<b>What to do:</b> No action needed individually. Useful as part of trend dashboards and forensic timelines.`);
+  }
+  return lines.join('<br/><br/>');
+}
+
+// ---------- LOGS EXPLORER ----------
+function renderLogs(){
+  const q = (document.getElementById('logSearch').value || '').toLowerCase();
+  const filtered = STATE.events.filter(e => !q || e.message.toLowerCase().includes(q) || e.source.toLowerCase().includes(q)).slice(0, 50);
+  document.getElementById('logList').innerHTML = filtered.map(e => {
+    const st = SEV_STYLE[e.severity] || SEV_STYLE.INFO;
+    return `
+      <details class="group">
+        <summary class="grid grid-cols-12 gap-2 px-4 py-2.5 text-xs hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">
+          <div class="col-span-1 chevron text-ibm-gray50">▸</div>
+          <div class="col-span-2 font-mono text-ibm-gray70 dark:text-ibm-gray30">${fmtTime(e.time)}</div>
+          <div class="col-span-1"><span class="chip ${st.bg} ${st.fg}">${e.severity}</span></div>
+          <div class="col-span-2 truncate"><span class="inline-block w-2 h-2 mr-1.5" style="background:${e.sourceColor}"></span>${escapeHtml(e.sourceName)}</div>
+          <div class="col-span-6 truncate font-mono">${escapeHtml(e.message)}</div>
+        </summary>
+        <div class="bg-ibm-gray10/50 dark:bg-ibm-gray90/50 px-4 py-3 border-t border-ibm-gray20 dark:border-ibm-gray80">
+          <div class="font-mono text-[10px] uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30 mb-1">Structured fields</div>
+          <pre class="text-xs font-mono whitespace-pre-wrap">${escapeHtml(JSON.stringify(e.payload, null, 2))}</pre>
+          <div class="mt-2 flex gap-2">
+            <button onclick="openEvent('${e.id}')" class="text-xs font-mono px-3 py-1 border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-white dark:hover:bg-ibm-gray100 transition">Open</button>
+            <button onclick="explainEvent('${e.id}')" class="text-xs font-mono px-3 py-1 border border-ibm-blue text-ibm-blue hover:bg-ibm-blue hover:text-white transition">Explain</button>
+          </div>
+        </div>
+      </details>`;
+  }).join('') || `<div class="p-8 text-center text-sm text-ibm-gray50 font-mono">No logs match.</div>`;
+}
+
+// ---------- MODAL / TOAST ----------
+function openModal(title, bodyHtml){
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalBody').innerHTML = bodyHtml;
+  const m = document.getElementById('modal');
+  m.classList.remove('hidden'); m.classList.add('flex');
+}
+function closeModal(){
+  const m = document.getElementById('modal');
+  m.classList.add('hidden'); m.classList.remove('flex');
+}
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.remove('hidden');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(()=> t.classList.add('hidden'), 2500);
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+// ---------- EXPLAIN MODAL CONTENT ----------
+const EXPLANATIONS = {
+  'overview': {
+    title: 'How NimbusPulse moves data',
+    body: `<p class="mb-3">Five logical stages, decoupled so each scales independently:</p>
+      <ol class="list-decimal list-inside space-y-2 text-sm">
+        <li><b>Sources</b> — cloud APIs, agents on hosts, sidecars in pods, webhooks, syslog, custom apps.</li>
+        <li><b>Ingest</b> — gateways speak the protocol the source uses: REST/POST, gRPC stream, GraphQL subscription, WebSocket, or Kafka.</li>
+        <li><b>Normalize</b> — schema map turns every shape into a common event record. Then enrich (geo, user, trace), mask PII, and route.</li>
+        <li><b>Store</b> — events fan out to specialized stores: Elasticsearch for search, ClickHouse for analytics, S3 for cold, Redis for hot counters, TimescaleDB for metrics.</li>
+        <li><b>Consume</b> — dashboards, alerts, the AI assistant, and exports all read from the query API.</li>
+      </ol>`
+  },
+  'schema': {
+    title: 'The common event schema',
+    body: `<p class="mb-2">Every connector normalizes its data into this minimal envelope:</p>
+      <pre class="bg-ibm-gray10 dark:bg-ibm-gray90 p-3 text-xs font-mono">{
+  "id":         "uuid",
+  "time":       "iso8601",
+  "severity":   "DEBUG|INFO|WARN|ERROR|CRITICAL",
+  "source":     "connector-id",
+  "message":    "human-readable summary",
+  "payload":    { /* original structured fields */ },
+  "enrichment": { /* added by pipeline */ }
+}</pre>
+      <p class="mt-3 text-sm">The connector's own <code class="font-mono">schema</code> block describes the shape of <code class="font-mono">payload</code> — that's what NiFi validates against the schema registry before publishing to Kafka.</p>`
+  },
+  'enrich': {
+    title: 'Why normalize and enrich?',
+    body: `<p class="text-sm leading-relaxed">Raw logs are written in dozens of formats. Without normalization, every query has to know each format. Once we map to a common envelope, search, alerting, and AI work the same across all sources.</p>
+      <p class="mt-3 text-sm leading-relaxed"><b>Enrichment</b> adds context the source didn't have: <i>geo</i> from IP, <i>user</i> from session, <i>trace_id</i> from request headers, <i>service</i> from k8s metadata. That context makes events useful weeks later during incident review.</p>
+      <p class="mt-3 text-sm leading-relaxed"><b>PII masking</b> happens here too, before data hits durable storage. Apache NiFi's <code class="font-mono">ReplaceText</code> with regex + tokenization handles emails, phone numbers, card numbers, and named fields like <code class="font-mono">password</code>.</p>`
+  },
+  'nifi': {
+    title: 'Apache NiFi — the heart of the pipeline',
+    body: `<p class="text-sm leading-relaxed mb-3">NiFi is a visual dataflow tool. You wire <i>processors</i> together on a canvas; each one does one thing (listen, parse, enrich, route, publish). It gives you:</p>
+      <ul class="list-disc list-inside space-y-1 text-sm">
+        <li><b>Back-pressure</b> — when downstream slows, NiFi buffers upstream rather than dropping data.</li>
+        <li><b>Provenance</b> — full lineage of every record, queryable.</li>
+        <li><b>300+ processors</b> — including ListenHTTP, ListenSyslog, ConsumeKafka, EvaluateJsonPath, ReplaceText, RouteOnAttribute, PublishKafkaRecord.</li>
+        <li><b>Hot-reloadable flows</b> — push a new connector spec, NiFi compiles it into a process group, no redeploys.</li>
+      </ul>
+      <p class="mt-3 text-sm">In NimbusPulse, every connector you define in JSON/YAML compiles into a NiFi process group with these stages: <i>listen → validate → enrich → mask → route → publish</i>.</p>`
+  },
+  'storage': {
+    title: 'Hot, warm, and cold storage',
+    body: `<table class="w-full text-xs font-mono">
+      <thead><tr class="border-b border-ibm-gray20 dark:border-ibm-gray80"><th class="text-left py-2">Tier</th><th class="text-left">Store</th><th class="text-left">Retention</th><th class="text-left">Query speed</th></tr></thead>
+      <tbody>
+        <tr class="border-b border-ibm-gray20 dark:border-ibm-gray80"><td class="py-1.5">Hot</td><td>Redis</td><td>15m</td><td>µs</td></tr>
+        <tr class="border-b border-ibm-gray20 dark:border-ibm-gray80"><td class="py-1.5">Hot</td><td>Elasticsearch</td><td>7d</td><td>ms</td></tr>
+        <tr class="border-b border-ibm-gray20 dark:border-ibm-gray80"><td class="py-1.5">Warm</td><td>ClickHouse</td><td>90d</td><td>10s of ms</td></tr>
+        <tr class="border-b border-ibm-gray20 dark:border-ibm-gray80"><td class="py-1.5">Warm</td><td>TimescaleDB</td><td>1y (metrics)</td><td>ms</td></tr>
+        <tr><td class="py-1.5">Cold</td><td>S3 + Iceberg</td><td>7y</td><td>seconds</td></tr>
+      </tbody>
+      </table>
+      <p class="mt-3 text-sm">Each store fits a query pattern. The query API routes a request to the right tier based on time range and query type, so callers see one interface.</p>`
+  },
+  'rag': {
+    title: 'How the AI uses your data',
+    body: `<p class="text-sm leading-relaxed">When you ask the AI a question, the system runs <b>RAG</b> (retrieval-augmented generation):</p>
+      <ol class="list-decimal list-inside space-y-1 text-sm mt-2">
+        <li>Embed your question into a vector.</li>
+        <li>Find the most relevant recent events in pgvector + Elasticsearch.</li>
+        <li>Pull metric snapshots from TimescaleDB for the time window.</li>
+        <li>Send the question + retrieved context to the LLM with strict instructions.</li>
+        <li>Stream the answer back, with links to the source events.</li>
+      </ol>
+      <p class="mt-3 text-sm">The LLM never sees raw PII (masked at ingest) and answers are grounded — every claim links to a source event you can audit.</p>`
+  },
+  'kpi-events': {
+    title: 'Events / sec',
+    body: `<p class="text-sm">Rolling 20-second average of events ingested across <b>all enabled connectors</b>. This is the headline rate — it reflects total ingest pressure.</p>
+      <p class="text-sm mt-3"><b>How it's computed:</b> <code class="font-mono">events_last_20s / 20</code>. Anomaly detector flags it if it deviates &gt;3σ from the 1-hour rolling baseline.</p>`
+  },
+  'kpi-error': {
+    title: 'Error rate',
+    body: `<p class="text-sm">Percentage of events at severity ERROR or CRITICAL since the simulation started.</p>
+      <p class="text-sm mt-3"><b>SLO:</b> 1.0%. Going above means we're burning error-budget. Three consecutive minutes above 2% pages on-call.</p>`
+  },
+  'kpi-sources': {
+    title: 'Active sources',
+    body: `<p class="text-sm">Count of connectors currently ingesting. A connector going from active → inactive without a deploy is itself an event worth investigating (the pipeline is silent — is the source down, or is the connector?).</p>`
+  },
+  'kpi-volume': {
+    title: 'Ingest volume / hour',
+    body: `<p class="text-sm">Estimated bytes-per-hour after gzip compression. The platform charges by ingest GB and storage GB-hours, so this drives cost.</p>
+      <p class="text-sm mt-3"><b>Optimization:</b> drop noisy DEBUG, sample successful events, route low-value sources to cold-only.</p>`
+  },
+  'throughput': {
+    title: 'Throughput chart',
+    body: `<p class="text-sm">Each bar = events received during one 2-second tick, over the last 60 ticks (2 minutes). Spikes here usually correlate with a deploy, a traffic surge, or — if isolated to one source — an agent restart.</p>`
+  },
+  'severity': {
+    title: 'Severity distribution',
+    body: `<p class="text-sm">Counts since the simulation started, by severity level. A healthy system is mostly INFO with a thin tail of WARN/ERROR. If CRITICAL is non-zero, something is on fire.</p>`
+  }
+};
+
+function openExplain(key){
+  const e = EXPLANATIONS[key];
+  if (!e) return;
+  openModal(e.title, e.body);
+}
+
+// ---------- AI CHAT ----------
+const SUGGESTED_PROMPTS = [
+  'Summarize the last 5 minutes of events',
+  'Why is the error rate climbing?',
+  'Show me failed logins',
+  'Which sources are silent?',
+  'What does OOMKilled mean?',
+  'Are there any security threats?',
+  'Top 3 noisy sources today',
+  'Explain this slow Postgres query'
+];
+
+function renderSuggested(){
+  document.getElementById('suggestedPrompts').innerHTML = SUGGESTED_PROMPTS.map(p =>
+    `<button onclick="askAI(${JSON.stringify(p)})" class="w-full text-left text-xs px-3 py-2 border border-ibm-gray20 dark:border-ibm-gray80 hover:border-ibm-blue hover:text-ibm-blue dark:hover:border-ibm-blue transition">${escapeHtml(p)}</button>`
+  ).join('');
+}
+
+function renderChat(){
+  const log = document.getElementById('chatLog');
+  if (!STATE.chat.length){
+    log.innerHTML = `<div class="text-center py-8 text-sm text-ibm-gray50 max-w-md mx-auto">
+      <div class="font-mono text-xs uppercase tracking-wider mb-2 text-ibm-blue">NimbusPulse Assistant</div>
+      <p>Ask anything about your ingested data — error spikes, security events, performance trends, or the meaning of a specific log line. Try a suggestion on the left.</p>
+    </div>`;
+    return;
+  }
+  log.innerHTML = STATE.chat.map(m => {
+    if (m.role === 'user'){
+      return `<div class="flex justify-end"><div class="max-w-[80%] bg-ibm-blue text-white px-4 py-2.5 text-sm">${escapeHtml(m.text)}</div></div>`;
+    } else if (m.role === 'typing'){
+      return `<div class="flex justify-start"><div class="bg-ibm-gray10 dark:bg-ibm-gray90 px-4 py-3 text-sm"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div></div>`;
+    } else {
+      return `<div class="flex justify-start"><div class="max-w-[88%] bg-ibm-gray10 dark:bg-ibm-gray90 border-l-4 border-ibm-blue px-4 py-3 text-sm leading-relaxed">${m.text}</div></div>`;
+    }
+  }).join('');
+  log.scrollTop = log.scrollHeight;
+}
+
+function saveChat(){
+  try { localStorage.setItem('np_chat', JSON.stringify(STATE.chat.filter(m => m.role !== 'typing'))); } catch(e){}
+}
+function loadChat(){
+  try { STATE.chat = JSON.parse(localStorage.getItem('np_chat')||'[]'); } catch(e){ STATE.chat = []; }
+}
+function clearChat(){
+  STATE.chat = []; saveChat(); renderChat(); toast('Chat history cleared');
+}
+
+function askAI(text){
+  if (!text || !text.trim()) return;
+  STATE.chat.push({ role:'user', text:text.trim() });
+  STATE.chat.push({ role:'typing' });
+  renderChat();
+  saveChat();
+  setTimeout(() => {
+    // remove typing
+    STATE.chat = STATE.chat.filter(m => m.role !== 'typing');
+    const reply = generateAIReply(text.trim());
+    STATE.chat.push({ role:'assistant', text:reply });
+    renderChat();
+    saveChat();
+  }, 700 + Math.random()*700);
+}
+
+function generateAIReply(q){
+  const Q = q.toLowerCase();
+  const sevCounts = STATE.sevCounts;
+  const total = Object.values(sevCounts).reduce((a,b)=>a+b,0);
+  const errPct = total ? ((sevCounts.ERROR + sevCounts.CRITICAL) / total * 100).toFixed(2) : '0.00';
+  const topSources = (() => {
+    const map = {};
+    STATE.events.forEach(e => { map[e.sourceName] = (map[e.sourceName]||0)+1; });
+    return Object.entries(map).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([s,n])=>`<b>${escapeHtml(s)}</b> (${n})`);
+  })();
+
+  // pattern match
+  if (/summar/i.test(Q) || /last.*(min|hour)|recent/i.test(Q)){
+    return `<b>Summary — last ${STATE.events.length} events ingested:</b><br/><br/>
+      • <b>${total}</b> total events · <b>${sevCounts.INFO||0}</b> INFO · <b>${sevCounts.WARN||0}</b> WARN · <b>${sevCounts.ERROR||0}</b> ERROR · <b>${sevCounts.CRITICAL||0}</b> CRITICAL<br/>
+      • Error rate: <b class="${errPct>1?'text-ibm-red':'text-ibm-green'}">${errPct}%</b> (SLO 1.0%)<br/>
+      • Most active sources: ${topSources.join(', ') || '—'}<br/><br/>
+      ${errPct > 1 ? '<b class="text-ibm-red">⚠</b> Error rate is over SLO. The top contributor is typically Kubernetes (OOMKilled) or upstream 5xx via Nginx. Open the Events section and filter by severity=ERROR to drill in.' : 'System looks healthy. No anomalies detected in the current window.'}`;
+  }
+
+  if (/error.*(climb|spike|why|increas|rate)|why.*error|fail/i.test(Q) && !/login|password|auth/i.test(Q)){
+    return `<b>Error rate analysis:</b><br/><br/>
+      Current error rate is <b>${errPct}%</b>. Looking at the last events, the ERROR-class messages cluster around:<br/><br/>
+      • <b>Kubernetes</b> — OOMKilled and ImagePullBackOff, suggesting either a recent deploy or memory pressure on the <code class="font-mono">prod</code> namespace<br/>
+      • <b>Nginx</b> — 502 responses, which mean an upstream service isn't replying<br/>
+      • <b>App health</b> — at least one service flapping between healthy / down<br/><br/>
+      <b>Recommended next step:</b> correlate the error timestamps with your deploy log. If a deploy went out in the last 30 minutes, this is a regression candidate — roll back and investigate.`;
+  }
+
+  if (/login|password|credential|auth.*fail|brute.*force|stuff/i.test(Q)){
+    return `<b>Auth / security events:</b><br/><br/>
+      Scanning <code class="font-mono">auth-logs</code>, <code class="font-mono">syslog</code>, and <code class="font-mono">security-siem</code>:<br/><br/>
+      • Failed SSO logins: clustered by IP — typical pattern of <b>credential stuffing</b><br/>
+      • sshd failed-password events from bastion hosts<br/>
+      • Possible SIEM alert: failed login bursts from a /16 subnet<br/><br/>
+      <b>Recommended next step:</b> block the source subnet at the WAF, force MFA re-enrollment on the targeted user list, and rate-limit <code class="font-mono">/login</code> to 5 attempts per IP per minute.`;
+  }
+
+  if (/security|threat|attack|breach|malware|sqli|xss/i.test(Q)){
+    return `<b>Security posture — current snapshot:</b><br/><br/>
+      Recent security signals across <code class="font-mono">waf</code>, <code class="font-mono">security-siem</code>, <code class="font-mono">aws-cloudtrail</code>:<br/><br/>
+      • <b>WAF</b> blocked SQL-injection attempts on <code class="font-mono">/api/search</code><br/>
+      • <b>SIEM</b> flagged a possible credential-stuffing burst<br/>
+      • <b>CloudTrail</b> shows IAM policy changes — review who, when, why<br/><br/>
+      None of these are individually critical, but the combination is worth a security review. Pivot to the Events section and filter source=security-siem.`;
+  }
+
+  if (/slow|latency|p95|p99|performance|response.*time|degrad/i.test(Q)){
+    return `<b>Performance signals:</b><br/><br/>
+      • <b>App Insights</b> reports <code class="font-mono">/api/checkout</code> p95 = 2.4s, p99 = 4.1s — both above target<br/>
+      • <b>Postgres</b> slow-query log captured ~8s queries on the <code class="font-mono">orders</code> table<br/>
+      • <b>CDN</b> reports 504s from the FRA edge — origin timeout<br/><br/>
+      The pattern (slow DB → slow API → CDN timeout) is consistent with database contention. Run <code class="font-mono">EXPLAIN ANALYZE</code> on the slow query — typical fix is a missing index on the WHERE column.`;
+  }
+
+  if (/k8s|kubernetes|pod|oom|crash|container/i.test(Q)){
+    return `<b>Kubernetes signals:</b><br/><br/>
+      • <code class="font-mono">checkout-api</code> pods restarting with <b>OOMKilled</b> (exitCode 137)<br/>
+      • <code class="font-mono">reports-job-x21</code> in <b>ImagePullBackOff</b> — registry timeout<br/>
+      • <code class="font-mono">user-svc</code> rolled out cleanly (6/6 ready)<br/><br/>
+      <b>OOMKilled</b> means the container exceeded its memory limit. Options: raise the limit, add HPA on memory, or fix the leak. The ImagePullBackOff is environmental — check the registry's status page.`;
+  }
+
+  if (/silent|missing|stop|inactive|down/i.test(Q)){
+    const all = getAllConnectors();
+    const off = all.filter(c => !c.enabled);
+    return `<b>Silent / paused connectors (${off.length}):</b><br/><br/>
+      ${off.length ? off.map(c => `• <b>${escapeHtml(c.name)}</b> (${escapeHtml(c.category)})`).join('<br/>') : 'All connectors are active.'}<br/><br/>
+      A connector going silent without a deploy is itself a signal — either the source is down or the connector pipeline broke. Both warrant a check.`;
+  }
+
+  if (/aws|cloudwatch|cloudtrail|s3/i.test(Q)){
+    return `<b>AWS signals:</b><br/><br/>
+      • <code class="font-mono">CloudWatch</code> alarm "HighCPU-prod-api" triggered<br/>
+      • <code class="font-mono">CloudTrail</code> shows IAM policy modifications and a root-account API call (review immediately)<br/>
+      • <code class="font-mono">S3 access</code> logs include AccessDenied events on the backups bucket<br/><br/>
+      The root-account event is the highest priority — verify out-of-band with the account owner and rotate keys if needed.`;
+  }
+
+  if (/noisy|top|loud|chatty/i.test(Q)){
+    return `<b>Top sources by event volume (last ${STATE.events.length} events):</b><br/><br/>
+      ${topSources.length ? topSources.map((s,i) => `${i+1}. ${s}`).join('<br/>') : 'No data yet — let the simulation run for a few ticks.'}<br/><br/>
+      If a source is unexpectedly noisy, consider sampling its DEBUG/INFO levels at the connector to cut ingest cost.`;
+  }
+
+  if (/oom|memory.*kill/i.test(Q)){
+    return `<b>OOMKilled</b> means the Linux kernel's out-of-memory killer terminated the container because it tried to use more memory than its cgroup allowed. The exit code is <code class="font-mono">137</code> (128 + SIGKILL=9).<br/><br/>
+      Kubernetes will restart the pod automatically. If it keeps happening you'll see <code class="font-mono">CrashLoopBackOff</code>.<br/><br/>
+      <b>Common fixes:</b> raise <code class="font-mono">resources.limits.memory</code>, add an HPA on memory, capture a heap dump to find a leak, or right-size after profiling.`;
+  }
+
+  if (/postgres|slow.*query|sql/i.test(Q)){
+    return `<b>Slow Postgres query analysis:</b><br/><br/>
+      The query <code class="font-mono">SELECT * FROM orders WHERE created_at &gt; $1</code> took ~8 seconds. Likely causes:<br/><br/>
+      • Missing index on <code class="font-mono">created_at</code> — forces a sequential scan over the whole table<br/>
+      • Stale statistics — run <code class="font-mono">ANALYZE orders</code><br/>
+      • <code class="font-mono">SELECT *</code> returning huge rows — project only needed columns<br/><br/>
+      <b>Quick check:</b> <code class="font-mono">EXPLAIN (ANALYZE, BUFFERS) ...</code>. Look for "Seq Scan" + high "rows".`;
+  }
+
+  if (/nifi|apache.*nifi|dataflow|pipeline/i.test(Q)){
+    return `<b>Apache NiFi</b> is the visual dataflow tool at the heart of the platform. It receives data from the ingest gateways, parses it, validates against the schema registry, enriches it with geo/user/trace metadata, masks PII, and publishes to the right Kafka topic.<br/><br/>
+      Each connector you define in JSON/YAML compiles to a NiFi <b>process group</b>: <i>listen → parse → validate → enrich → mask → route → publish</i>. NiFi gives back-pressure, full provenance, and hot-reload — you can push a new flow without restarting anything.`;
+  }
+
+  if (/explain|what.*mean|what.*is|how.*work/i.test(Q)){
+    return `Happy to explain. Here's what's most useful to know:<br/><br/>
+      • The <b>dashboard</b> shows live KPIs computed from the in-memory event stream<br/>
+      • Each <b>connector</b> simulates a real-world source (AWS, k8s, syslog, etc.) and produces realistic events<br/>
+      • Click any <b>event row</b> to see the raw payload and run an AI explanation<br/>
+      • The <b>production architecture</b> diagram (section 07) shows what we'd build behind this UI — Apache NiFi for dataflow, Kafka for the bus, Elasticsearch/ClickHouse/S3 for storage<br/><br/>
+      Ask me about a specific connector, event, or metric and I'll go deeper.`;
+  }
+
+  // default
+  return `I can help with: error analysis, security events, performance trends, kubernetes issues, AWS / Azure / GCP signals, connector status, and the meaning of specific log lines.<br/><br/>
+    Try a more specific question, like:<br/>
+    • "summarize the last 5 minutes"<br/>
+    • "why is the error rate climbing"<br/>
+    • "show me failed logins"<br/>
+    • "what does OOMKilled mean"<br/><br/>
+    Or click one of the suggested prompts on the left.`;
+}
+
+// ---------- FORM / FILTER WIRING ----------
+document.getElementById('eventSevFilter').addEventListener('change', renderEvents);
+document.getElementById('eventSrcFilter').addEventListener('change', renderEvents);
+document.getElementById('logSearch').addEventListener('input', renderLogs);
+document.getElementById('chatForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const inp = document.getElementById('chatInput');
+  const v = inp.value;
+  inp.value = '';
+  askAI(v);
+});
+
+// ---------- BOOT ----------
+function boot(){
+  renderConnectors();
+  renderSuggested();
+  loadChat();
+  renderChat();
+  renderKPIs(0);
+  renderThroughputChart();
+  renderSeverityBars();
+  renderEvents();
+  renderLogs();
+  // Seed a few events so the page isn't empty on first paint
+  for (let i=0; i<12; i++){
+    const ev = generateEvent();
+    if (ev) { STATE.events.push(ev); STATE.sevCounts[ev.severity]++; STATE.totalEvents++; if (ev.severity==='ERROR'||ev.severity==='CRITICAL') STATE.totalErrors++; }
+  }
+  STATE.events.sort((a,b) => b.time - a.time);
+  renderEvents(); renderLogs(); renderKPIs(0); renderSeverityBars();
+  startSim();
+}
+boot();
+</script>
+
+</body>
+</html>
