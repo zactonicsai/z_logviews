@@ -1,0 +1,409 @@
+# =============================================================================
+# NimbusPulse POC — full stack
+# Run:  docker compose up -d
+# Stop: docker compose down -v
+# =============================================================================
+name: nimbuspulse
+
+x-restart: &restart
+  restart: unless-stopped
+
+networks:
+  np:
+    driver: bridge
+
+volumes:
+  es-data:
+  ch-data:
+  ts-data:
+  minio-data:
+  redis-data:
+  nifi-data:
+  nifi-conf:
+  grafana-data:
+  kafka-data:
+
+services:
+
+  # ===========================================================================
+  # MAIN DASHBOARD — the entry point for clicking around
+  # ===========================================================================
+  dashboard:
+    build: ./dashboard
+    container_name: np-dashboard
+    ports: ["8080:80"]
+    networks: [np]
+    <<: *restart
+
+  # ===========================================================================
+  # STREAM BUS — Apache Kafka (KRaft mode, no Zookeeper)
+  # ===========================================================================
+  kafka:
+    image: apache/kafka:latest
+    container_name: np-kafka
+    ports: ["9092:9092", "9094:9094"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      CLUSTER_ID: nimbuspulse-cluster-001
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [np]
+    <<: *restart
+
+  # Kafka UI for browsing topics, messages, consumer groups
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: np-kafka-ui
+    ports: ["8181:8080"]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: nimbuspulse
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "true"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks: [np]
+    <<: *restart
+
+  # Create initial Kafka topics
+  kafka-init:
+    image: apache/kafka:latest
+    container_name: np-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks: [np]
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        echo "Creating Kafka topics..."
+        for t in raw.cloudwatch raw.k8s-events raw.syslog raw.security raw.nginx events.normalized events.info events.warn events.error events.critical metrics.aggregated; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic $$t --partitions 3 --replication-factor 1
+        done
+        echo "Topics created."
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
+
+  # ===========================================================================
+  # DATAFLOW — Apache NiFi
+  # ===========================================================================
+  nifi:
+    image: apache/nifi:latest
+    container_name: np-nifi
+    ports: ["8443:8443"]
+    environment:
+      SINGLE_USER_CREDENTIALS_USERNAME: admin
+      SINGLE_USER_CREDENTIALS_PASSWORD: ctsBtRBKHRAx69EqUghvvgEvjnaLjFEB
+      NIFI_WEB_HTTPS_PORT: 8443
+      NIFI_WEB_HTTPS_HOST: 0.0.0.0
+      NIFI_WEB_PROXY_HOST: localhost:8443
+    volumes:
+      - nifi-data:/opt/nifi/nifi-current/data
+      - nifi-conf:/opt/nifi/nifi-current/conf
+      - ./nifi:/opt/nifi/nifi-current/flows:ro
+    networks: [np]
+    <<: *restart
+
+  # ===========================================================================
+  # STORAGE — Elasticsearch (full-text & primary event store)
+  # ===========================================================================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    container_name: np-elasticsearch
+    ports: ["9200:9200"]
+    environment:
+      discovery.type: single-node
+      ES_JAVA_OPTS: "-Xms1g -Xmx1g"
+      xpack.security.enabled: "false"
+      xpack.security.enrollment.enabled: "false"
+      cluster.name: nimbuspulse-es
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [np]
+    <<: *restart
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.3
+    container_name: np-kibana
+    ports: ["5601:5601"]
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      SERVER_PUBLICBASEURL: http://localhost:5601
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks: [np]
+    <<: *restart
+
+  # ===========================================================================
+  # STORAGE — ClickHouse (OLAP analytics)
+  # ===========================================================================
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: np-clickhouse
+    ports: ["8123:8123", "9100:9000"]
+    environment:
+      CLICKHOUSE_DB: nimbuspulse
+      CLICKHOUSE_USER: nimbus
+      CLICKHOUSE_PASSWORD: nimbus
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - ch-data:/var/lib/clickhouse
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    networks: [np]
+    <<: *restart
+
+  # ===========================================================================
+  # STORAGE — Redis (hot cache & counters)
+  # ===========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: np-redis
+    ports: ["6379:6379"]
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    networks: [np]
+    <<: *restart
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: np-redis-commander
+    ports: ["8182:8081"]
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    depends_on: [redis]
+    networks: [np]
+    <<: *restart
+
+  # ===========================================================================
+  # STORAGE — TimescaleDB (time-series metrics; Postgres compatible)
+  # ===========================================================================
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: np-timescaledb
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_DB: metrics
+      POSTGRES_USER: nimbus
+      POSTGRES_PASSWORD: nimbus
+    volumes:
+      - ts-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nimbus -d metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [np]
+    <<: *restart
+
+  adminer:
+    image: adminer:latest
+    container_name: np-adminer
+    ports: ["8888:8080"]
+    environment:
+      ADMINER_DEFAULT_SERVER: timescaledb
+    depends_on: [timescaledb]
+    networks: [np]
+    <<: *restart
+
+  # ===========================================================================
+  # STORAGE — MinIO (S3-compatible cold storage)
+  # ===========================================================================
+  minio:
+    image: minio/minio:latest
+    container_name: np-minio
+    ports: ["9000:9000", "9001:9001"]
+    environment:
+      MINIO_ROOT_USER: nimbus
+      MINIO_ROOT_PASSWORD: nimbus-secret
+    volumes:
+      - minio-data:/data
+    command: ["server", "/data", "--console-address", ":9001"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [np]
+    <<: *restart
+
+  # Create the cold-storage bucket on first run
+  minio-init:
+    image: minio/mc:latest
+    container_name: np-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [np]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mc alias set local http://minio:9000 nimbus nimbus-secret &&
+        mc mb --ignore-existing local/np-cold-events &&
+        mc mb --ignore-existing local/np-cold-archive &&
+        echo "MinIO buckets ready."
+
+  # ===========================================================================
+  # OBSERVABILITY — Grafana (dashboards over ES, Postgres, ClickHouse)
+  # ===========================================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: np-grafana
+    ports: ["3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: nimbus
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    depends_on: [elasticsearch, timescaledb, clickhouse]
+    networks: [np]
+    <<: *restart
+
+  # ===========================================================================
+  # CUSTOM SERVICES — Go: Sink service (Kafka → ES + Redis + Timescale)
+  # ===========================================================================
+  sink:
+    build: ./services/sink
+    container_name: np-sink
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      ES_URL: http://elasticsearch:9200
+      REDIS_ADDR: redis:6379
+      PG_DSN: "host=timescaledb user=nimbus password=nimbus dbname=metrics sslmode=disable"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    networks: [np]
+    <<: *restart
+
+  # ===========================================================================
+  # CUSTOM SERVICES — Go: Query API
+  # ===========================================================================
+  query-api:
+    build: ./services/query-api
+    container_name: np-query-api
+    ports: ["8090:8090"]
+    environment:
+      ES_URL: http://elasticsearch:9200
+      REDIS_ADDR: redis:6379
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      redis: { condition: service_started }
+    networks: [np]
+    <<: *restart
+
+  # ===========================================================================
+  # CUSTOM SERVICES — Python FastAPI: AI Assistant
+  # ===========================================================================
+  ai-assistant:
+    build: ./services/ai-assistant
+    container_name: np-ai-assistant
+    ports: ["8091:8091"]
+    environment:
+      QUERY_API_URL: http://query-api:8090
+    depends_on: [query-api]
+    networks: [np]
+    <<: *restart
+
+  # ===========================================================================
+  # SAMPLE CONNECTORS — produce simulated source data to Kafka
+  # ===========================================================================
+  connector-cloudwatch:
+    build: ./connectors/cloudwatch-sim
+    container_name: np-conn-cloudwatch
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      TOPIC: raw.cloudwatch
+      RATE_PER_SEC: "3"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks: [np]
+    <<: *restart
+
+  connector-k8s-events:
+    build: ./connectors/k8s-events-sim
+    container_name: np-conn-k8s
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      TOPIC: raw.k8s-events
+      RATE_PER_SEC: "4"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks: [np]
+    <<: *restart
+
+  connector-syslog:
+    build: ./connectors/syslog-sim
+    container_name: np-conn-syslog
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      TOPIC: raw.syslog
+      RATE_PER_SEC: "5"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks: [np]
+    <<: *restart
+
+  connector-security:
+    build: ./connectors/security-sim
+    container_name: np-conn-security
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      TOPIC: raw.security
+      RATE_PER_SEC: "2"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks: [np]
+    <<: *restart
+
+  connector-nginx:
+    build: ./connectors/nginx-sim
+    container_name: np-conn-nginx
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      TOPIC: raw.nginx
+      RATE_PER_SEC: "8"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks: [np]
+    <<: *restart

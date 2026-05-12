@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en" class="">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NimbusPulse POC — Demo Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: { extend: {
+      colors: { ibm: {
+        blue:'#0f62fe', blue70:'#0043ce', blue80:'#002d9c',
+        blue30:'#a6c8ff', blue20:'#d0e2ff', blue10:'#edf5ff',
+        cyan:'#1192e8', teal:'#009d9a', green:'#24a148',
+        yellow:'#f1c21b', orange:'#ff832b', red:'#da1e28',
+        magenta:'#ee5396', purple:'#8a3ffc',
+        gray10:'#f4f4f4', gray20:'#e0e0e0', gray30:'#c6c6c6',
+        gray50:'#8d8d8d', gray70:'#525252', gray80:'#393939',
+        gray90:'#262626', gray100:'#161616'
+      }},
+      fontFamily: {
+        sans:['"IBM Plex Sans"','system-ui','sans-serif'],
+        mono:['"IBM Plex Mono"','ui-monospace','monospace']
+      }
+    }}
+  }
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  body { font-family: 'IBM Plex Sans', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  .font-mono { font-family: 'IBM Plex Mono', monospace; }
+  .grid-bg {
+    background-image:
+      linear-gradient(to right, rgba(15,98,254,0.07) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(15,98,254,0.07) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .dark .grid-bg {
+    background-image:
+      linear-gradient(to right, rgba(166,200,255,0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(166,200,255,0.06) 1px, transparent 1px);
+  }
+  @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(1.5)} }
+  .live-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
+  @keyframes typing { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-4px)} }
+  .typing-dot { animation: typing 1.2s ease-in-out infinite; display:inline-block; width:6px; height:6px; border-radius:50%; background:#0f62fe; margin:0 2px; }
+  .typing-dot:nth-child(2){ animation-delay:.15s }
+  .typing-dot:nth-child(3){ animation-delay:.3s }
+  .chip { display:inline-flex; align-items:center; gap:.25rem; padding:.125rem .5rem; font-size:.7rem; font-weight:500; font-family:'IBM Plex Mono', monospace; letter-spacing:.02em; }
+  ::-webkit-scrollbar { width:8px; height:8px; }
+  ::-webkit-scrollbar-thumb { background:#c6c6c6; }
+  .dark ::-webkit-scrollbar-thumb { background:#525252; }
+  *:focus-visible { outline: 2px solid #0f62fe; outline-offset: 2px; }
+  .status-dot { width:8px; height:8px; display:inline-block; }
+</style>
+</head>
+<body class="bg-white text-ibm-gray100 dark:bg-ibm-gray100 dark:text-ibm-gray10 transition-colors">
+
+<!-- HEADER -->
+<header class="sticky top-0 z-40 border-b border-ibm-gray20 dark:border-ibm-gray80 bg-white/95 dark:bg-ibm-gray100/95 backdrop-blur">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
+    <div class="flex items-center gap-2.5">
+      <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+        <rect x="2" y="2" width="28" height="28" fill="#0f62fe"/>
+        <path d="M8 10h16M8 16h10M8 22h13" stroke="white" stroke-width="2"/>
+        <circle cx="22" cy="16" r="2" fill="white"/>
+        <circle cx="25" cy="22" r="2" fill="white"/>
+      </svg>
+      <div class="leading-tight">
+        <div class="font-semibold text-sm tracking-tight">NimbusPulse</div>
+        <div class="text-[10px] font-mono text-ibm-gray50 uppercase tracking-wider">POC · Docker Compose</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="hidden sm:inline-flex items-center gap-2 text-xs font-mono text-ibm-gray70 dark:text-ibm-gray30">
+        <span class="live-dot w-2 h-2 rounded-full bg-ibm-green inline-block"></span>
+        <span id="liveStatus">LIVE — 0 ev/s</span>
+      </span>
+      <button id="themeToggle" class="p-2 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">
+        <svg id="iconSun" class="w-4 h-4 hidden dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg id="iconMoon" class="w-4 h-4 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- HERO -->
+<section class="grid-bg border-b border-ibm-gray20 dark:border-ibm-gray80">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-10 lg:py-14">
+    <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue mb-3">Proof of Concept · Live in Docker</div>
+    <h1 class="text-3xl sm:text-4xl lg:text-5xl font-light leading-tight tracking-tight">
+      The full pipeline,<br/><span class="font-semibold text-ibm-blue">running in containers on your machine.</span>
+    </h1>
+    <p class="mt-4 text-sm sm:text-base text-ibm-gray70 dark:text-ibm-gray30 max-w-3xl">
+      Five sample connectors (Python + Go) → Kafka → Sink service → Elasticsearch + Redis + TimescaleDB. Apache NiFi is provisioned alongside for visual dataflow design. Click any tile below to open a service.
+    </p>
+  </div>
+</section>
+
+<!-- LIVE STATS -->
+<section class="border-b border-ibm-gray20 dark:border-ibm-gray80">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue">Live Pipeline Stats</div>
+        <div class="text-sm text-ibm-gray70 dark:text-ibm-gray30 mt-1">Polled from the Query API every 3 seconds</div>
+      </div>
+      <span class="text-xs font-mono text-ibm-gray50" id="lastUpdate">—</span>
+    </div>
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80">
+      <div class="bg-white dark:bg-ibm-gray100 p-4">
+        <div class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30">Total events</div>
+        <div class="font-mono text-2xl font-semibold text-ibm-blue mt-1" id="statTotal">—</div>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-4">
+        <div class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30">Error rate</div>
+        <div class="font-mono text-2xl font-semibold mt-1" id="statError">—</div>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-4">
+        <div class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30">Active sources</div>
+        <div class="font-mono text-2xl font-semibold mt-1" id="statSources">—</div>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-4">
+        <div class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30">Throughput (now)</div>
+        <div class="font-mono text-2xl font-semibold mt-1" id="statTput">—</div>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-4">
+        <div class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30">Sev distribution</div>
+        <div class="flex items-end gap-1 h-7 mt-1" id="statSevBar"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SERVICE TILES -->
+<section class="border-b border-ibm-gray20 dark:border-ibm-gray80 bg-ibm-gray10/40 dark:bg-ibm-gray100">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue mb-3">§ Services · click to open</div>
+    <h2 class="text-2xl font-light mb-8">Every running container, one click away</h2>
+
+    <!-- DATAFLOW & STORAGE -->
+    <div class="mb-8">
+      <div class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30 mb-3">Dataflow · Bus · Storage</div>
+      <div id="tileGridCore" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80"></div>
+    </div>
+
+    <!-- CUSTOM APPS -->
+    <div class="mb-8">
+      <div class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30 mb-3">Custom services (Go + Python)</div>
+      <div id="tileGridApps" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80"></div>
+    </div>
+
+    <!-- CONNECTORS -->
+    <div>
+      <div class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30 mb-3">Sample data connectors (running, no UI — view logs via <code class="font-mono text-ibm-blue">docker logs</code>)</div>
+      <div id="tileGridConn" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80"></div>
+    </div>
+  </div>
+</section>
+
+<!-- RECENT EVENTS -->
+<section class="border-b border-ibm-gray20 dark:border-ibm-gray80">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue">§ Recent events</div>
+        <h2 class="text-2xl font-light mt-1">Live tail from the sink → Redis</h2>
+      </div>
+      <div class="flex gap-2 text-xs">
+        <select id="sevFilter" class="px-2 py-1.5 border border-ibm-gray30 dark:border-ibm-gray70 bg-white dark:bg-ibm-gray100 font-mono">
+          <option value="">All severities</option>
+          <option>INFO</option><option>WARN</option><option>ERROR</option><option>CRITICAL</option>
+        </select>
+        <select id="srcFilter" class="px-2 py-1.5 border border-ibm-gray30 dark:border-ibm-gray70 bg-white dark:bg-ibm-gray100 font-mono">
+          <option value="">All sources</option>
+        </select>
+      </div>
+    </div>
+    <div class="border border-ibm-gray20 dark:border-ibm-gray80 bg-white dark:bg-ibm-gray100">
+      <div class="grid grid-cols-12 gap-2 px-4 py-2 text-[10px] font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30 border-b border-ibm-gray20 dark:border-ibm-gray80 bg-ibm-gray10/50 dark:bg-ibm-gray90/50">
+        <div class="col-span-2">Time</div><div class="col-span-1">Sev</div>
+        <div class="col-span-2">Source</div><div class="col-span-7">Message</div>
+      </div>
+      <div id="eventList" class="max-h-[400px] overflow-y-auto"></div>
+    </div>
+  </div>
+</section>
+
+<!-- AI ASSISTANT -->
+<section class="border-b border-ibm-gray20 dark:border-ibm-gray80 bg-ibm-gray10/40 dark:bg-ibm-gray100">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue mb-2">§ AI Assistant (FastAPI)</div>
+    <h2 class="text-2xl font-light mb-1">Ask anything about your live data</h2>
+    <p class="text-sm text-ibm-gray70 dark:text-ibm-gray30 mb-6">Calls <code class="font-mono text-ibm-blue">POST /api/v1/ask</code> on the AI assistant — which pulls live stats from the Query API and returns a grounded answer with citations.</p>
+
+    <div class="grid lg:grid-cols-4 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80">
+      <aside class="lg:col-span-1 bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30 mb-3">Suggested prompts</div>
+        <div id="suggestedPrompts" class="space-y-2"></div>
+      </aside>
+      <div class="lg:col-span-3 bg-white dark:bg-ibm-gray100 flex flex-col" style="min-height: 460px;">
+        <div class="px-5 py-3 border-b border-ibm-gray20 dark:border-ibm-gray80 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-ibm-green live-dot"></span>
+            <span class="text-xs font-mono uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30">Assistant</span>
+            <span id="aiStatus" class="text-xs font-mono text-ibm-gray50">· checking…</span>
+          </div>
+          <span class="text-xs font-mono text-ibm-gray50" id="aiLatency"></span>
+        </div>
+        <div id="chatLog" class="flex-1 overflow-y-auto p-5 space-y-4" style="max-height: 380px;"></div>
+        <form id="chatForm" class="border-t border-ibm-gray20 dark:border-ibm-gray80 p-3 flex gap-2">
+          <input id="chatInput" type="text" placeholder="Ask about errors, security, performance, or specific events…" class="flex-1 px-3 py-2 text-sm bg-transparent border border-ibm-gray30 dark:border-ibm-gray70 focus:border-ibm-blue focus:ring-0" autocomplete="off"/>
+          <button type="submit" class="px-4 py-2 bg-ibm-blue text-white text-sm font-medium hover:bg-ibm-blue70 transition">Send →</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- COMMANDS -->
+<section class="border-b border-ibm-gray20 dark:border-ibm-gray80">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue mb-2">§ Useful commands</div>
+    <h2 class="text-2xl font-light mb-6">Inspect the running stack from the terminal</h2>
+    <div class="grid md:grid-cols-2 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80">
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">Watch a connector</div>
+        <pre class="bg-ibm-gray10 dark:bg-ibm-gray90 p-3 text-xs font-mono overflow-x-auto">docker logs -f np-conn-k8s
+docker logs -f np-conn-cloudwatch
+docker logs -f np-conn-security</pre>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">Inspect a Kafka topic</div>
+        <pre class="bg-ibm-gray10 dark:bg-ibm-gray90 p-3 text-xs font-mono overflow-x-auto">docker exec -it np-kafka \
+  /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 \
+  --topic raw.k8s-events --from-beginning</pre>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">Query the Query API directly</div>
+        <pre class="bg-ibm-gray10 dark:bg-ibm-gray90 p-3 text-xs font-mono overflow-x-auto">curl http://localhost:8090/api/v1/stats
+curl 'http://localhost:8090/api/v1/search?sev=ERROR'
+curl 'http://localhost:8090/api/v1/recent?n=10'</pre>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">Stop / restart everything</div>
+        <pre class="bg-ibm-gray10 dark:bg-ibm-gray90 p-3 text-xs font-mono overflow-x-auto">docker compose down       # stop
+docker compose down -v    # stop + wipe data
+docker compose up -d      # start
+docker compose ps         # status</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="bg-ibm-gray10/40 dark:bg-ibm-gray100">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col sm:flex-row justify-between gap-3 text-xs text-ibm-gray70 dark:text-ibm-gray30 font-mono">
+    <div>NimbusPulse POC · all services running locally via Docker Compose</div>
+    <div>Apache NiFi · Kafka · Elasticsearch · ClickHouse · Redis · TimescaleDB · MinIO · Grafana</div>
+  </div>
+</footer>
+
+<script>
+/* ============ Theme ============ */
+(() => {
+  const saved = localStorage.getItem('np_theme');
+  if (saved === 'dark' || (!saved && matchMedia('(prefers-color-scheme: dark)').matches))
+    document.documentElement.classList.add('dark');
+})();
+document.getElementById('themeToggle').addEventListener('click', () => {
+  document.documentElement.classList.toggle('dark');
+  localStorage.setItem('np_theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+});
+
+/* ============ Service tile definitions ============ */
+const HOST = window.location.hostname || 'localhost';
+const url = (port, path='') => `http://${HOST}:${port}${path}`;
+
+const CORE_TILES = [
+  { name:'Apache NiFi',     desc:'Visual dataflow orchestrator. Build / inspect the production flow.', port:8443, scheme:'https',
+    badge:'DATAFLOW', color:'#0f62fe',
+    creds:'admin / ctsBtRBKHRAx69EqUghvvgEvjnaLjFEB', note:'Self-signed cert — accept warning in browser.' },
+  { name:'Kafka UI',         desc:'Browse topics, messages, consumer groups in real time.', port:8181, badge:'BUS', color:'#002d9c' },
+  { name:'Kibana',           desc:'Explore the np-events index in Elasticsearch.', port:5601, badge:'SEARCH', color:'#1192e8',
+    note:'On first open, create a data view for the index pattern np-events.' },
+  { name:'Elasticsearch API', desc:'Raw HTTP API. Index: np-events.', port:9200, badge:'STORE', color:'#002d9c',
+    path:'/np-events/_count' },
+  { name:'ClickHouse',       desc:'OLAP analytics. HTTP interface.', port:8123, badge:'OLAP', color:'#0043ce',
+    note:'User: nimbus / nimbus  Try: SELECT 1', path:'/play' },
+  { name:'Adminer (Timescale)', desc:'SQL browser for the TimescaleDB metrics store.', port:8888, badge:'TS-DB', color:'#009d9a',
+    note:'System: PostgreSQL · Server: timescaledb · User: nimbus · Pass: nimbus · DB: metrics' },
+  { name:'Redis Commander',  desc:'Inspect keys, counters, and the recent-event list.', port:8182, badge:'CACHE', color:'#da1e28' },
+  { name:'MinIO Console',    desc:'S3-compatible cold storage. Buckets pre-created.', port:9001, badge:'COLD', color:'#525252',
+    note:'User: nimbus · Pass: nimbus-secret' },
+  { name:'Grafana',          desc:'Pre-wired datasources for Postgres + Elasticsearch.', port:3000, badge:'DASHBOARDS', color:'#ff832b',
+    note:'Anonymous viewer access enabled. Admin login: admin / nimbus' },
+];
+
+const APP_TILES = [
+  { name:'Query API',     desc:'Go service · GET /api/v1/stats, /search, /recent, /throughput, /sources', port:8090, badge:'GO · REST', color:'#0f62fe', path:'/api/v1/stats' },
+  { name:'AI Assistant',  desc:'Python FastAPI · POST /api/v1/ask · OpenAPI docs at /docs', port:8091, badge:'PYTHON · FASTAPI', color:'#8a3ffc', path:'/docs' },
+  { name:'This Dashboard', desc:'Nginx-served static HTML. The page you are reading.', port:8080, badge:'HTML · TAILWIND', color:'#24a148' },
+];
+
+const CONNECTORS = [
+  { id:'cloudwatch', name:'AWS CloudWatch',    lang:'Python', container:'np-conn-cloudwatch', color:'#ff832b', topic:'raw.cloudwatch' },
+  { id:'k8s',        name:'Kubernetes Events', lang:'Go',     container:'np-conn-k8s',         color:'#8a3ffc', topic:'raw.k8s-events' },
+  { id:'syslog',     name:'Syslog (RFC 5424)', lang:'Python', container:'np-conn-syslog',      color:'#ee5396', topic:'raw.syslog' },
+  { id:'security',   name:'Security / SIEM',   lang:'Go',     container:'np-conn-security',    color:'#da1e28', topic:'raw.security' },
+  { id:'nginx',      name:'Nginx Access',      lang:'Python', container:'np-conn-nginx',       color:'#009d9a', topic:'raw.nginx' },
+];
+
+/* ============ Render tiles ============ */
+function renderTile(t, container) {
+  const href = t.scheme === 'https'
+    ? `https://${HOST}:${t.port}${t.path||''}`
+    : url(t.port, t.path||'');
+  const cred = t.creds ? `<div class="text-[10px] font-mono text-ibm-gray70 dark:text-ibm-gray30 mt-2"><b>creds:</b> ${t.creds}</div>` : '';
+  const note = t.note ? `<div class="text-[10px] text-ibm-gray70 dark:text-ibm-gray30 mt-2 italic">${t.note}</div>` : '';
+  return `
+    <a href="${href}" target="_blank" rel="noopener" class="bg-white dark:bg-ibm-gray100 p-4 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition group block">
+      <div class="flex items-start justify-between mb-2">
+        <span class="chip text-white" style="background:${t.color}">${t.badge}</span>
+        <span class="text-[10px] font-mono text-ibm-gray50" data-svc-port="${t.port}" data-svc-scheme="${t.scheme||'http'}">
+          <span class="status-dot bg-ibm-gray30 inline-block"></span> :${t.port}
+        </span>
+      </div>
+      <div class="text-sm font-semibold mb-1 group-hover:text-ibm-blue transition">${t.name}</div>
+      <div class="text-xs text-ibm-gray70 dark:text-ibm-gray30 leading-snug">${t.desc}</div>
+      ${cred}
+      ${note}
+      <div class="text-[10px] font-mono text-ibm-blue mt-3 group-hover:underline">open →</div>
+    </a>`;
+}
+
+function renderConnectorTile(c) {
+  return `
+    <div class="bg-white dark:bg-ibm-gray100 p-4">
+      <div class="flex items-start justify-between mb-2">
+        <span class="chip text-white" style="background:${c.color}">${c.lang.toUpperCase()}</span>
+        <span class="chip bg-ibm-green text-white">● LIVE</span>
+      </div>
+      <div class="text-sm font-semibold mb-1">${c.name}</div>
+      <div class="text-[10px] font-mono text-ibm-gray70 dark:text-ibm-gray30">container: ${c.container}</div>
+      <div class="text-[10px] font-mono text-ibm-gray70 dark:text-ibm-gray30">topic: <span class="text-ibm-blue">${c.topic}</span></div>
+      <pre class="bg-ibm-gray10 dark:bg-ibm-gray90 p-2 text-[10px] font-mono mt-3 overflow-x-auto">docker logs -f ${c.container}</pre>
+    </div>`;
+}
+
+document.getElementById('tileGridCore').innerHTML = CORE_TILES.map(t => renderTile(t)).join('');
+document.getElementById('tileGridApps').innerHTML = APP_TILES.map(t => renderTile(t)).join('');
+document.getElementById('tileGridConn').innerHTML = CONNECTORS.map(renderConnectorTile).join('');
+
+/* ============ Status pings ============ */
+async function pingService(port, scheme='http', path='/') {
+  // Most internal services don't allow CORS. We use no-cors so we at least
+  // detect TCP-level reachability via opaque responses.
+  try {
+    await fetch(`${scheme}://${HOST}:${port}${path}`, { mode:'no-cors', cache:'no-store' });
+    return true;
+  } catch { return false; }
+}
+async function refreshStatuses() {
+  const tiles = [...CORE_TILES, ...APP_TILES];
+  for (const t of tiles) {
+    const el = document.querySelector(`[data-svc-port="${t.port}"][data-svc-scheme="${t.scheme||'http'}"]`);
+    if (!el) continue;
+    const ok = await pingService(t.port, t.scheme||'http', t.path||'/');
+    const dot = el.querySelector('.status-dot');
+    dot.className = `status-dot inline-block ${ok ? 'bg-ibm-green' : 'bg-ibm-red'}`;
+  }
+}
+
+/* ============ Live stats from Query API ============ */
+const SEV_COLORS = { DEBUG:'#8d8d8d', INFO:'#0f62fe', WARN:'#f1c21b', ERROR:'#ff832b', CRITICAL:'#da1e28' };
+const SEV_BG     = { DEBUG:'bg-ibm-gray50', INFO:'bg-ibm-blue', WARN:'bg-ibm-yellow', ERROR:'bg-ibm-orange', CRITICAL:'bg-ibm-red' };
+
+let lastTotal = 0, lastTime = Date.now();
+
+async function refreshStats() {
+  try {
+    const r = await fetch(url(8090, '/api/v1/stats'));
+    if (!r.ok) throw new Error(r.statusText);
+    const s = await r.json();
+    const total = s.total||0, err = s.errorRate||0, sevs = s.bySeverity||{};
+    const now = Date.now(); const dt = (now - lastTime)/1000;
+    const eps = dt > 0 ? Math.max(0, (total - lastTotal)/dt) : 0;
+    lastTotal = total; lastTime = now;
+    document.getElementById('statTotal').textContent = total.toLocaleString();
+    const errEl = document.getElementById('statError');
+    errEl.textContent = err.toFixed(2) + '%';
+    errEl.className = 'font-mono text-2xl font-semibold mt-1 ' + (err > 1 ? 'text-ibm-red' : 'text-ibm-green');
+    document.getElementById('statSources').textContent = Object.keys(s.bySource||{}).length;
+    document.getElementById('statTput').textContent = eps.toFixed(1) + ' ev/s';
+    document.getElementById('liveStatus').textContent = `LIVE — ${eps.toFixed(1)} ev/s`;
+    const totalSev = Object.values(sevs).reduce((a,b)=>a+b,0)||1;
+    document.getElementById('statSevBar').innerHTML = ['CRITICAL','ERROR','WARN','INFO','DEBUG'].map(k => {
+      const pct = ((sevs[k]||0)/totalSev*100).toFixed(1);
+      return `<div title="${k}: ${sevs[k]||0}" class="${SEV_BG[k]}" style="width:${Math.max(2,pct)}px; height:100%;"></div>`;
+    }).join('');
+    document.getElementById('lastUpdate').textContent = 'updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById('lastUpdate').textContent = 'query-api unreachable — is np-query-api running?';
+  }
+}
+
+async function refreshEvents() {
+  try {
+    const r = await fetch(url(8090, '/api/v1/recent?n=50'));
+    if (!r.ok) throw new Error(r.statusText);
+    const { events } = await r.json();
+    const sevF = document.getElementById('sevFilter').value;
+    const srcF = document.getElementById('srcFilter').value;
+    // populate source dropdown
+    const sources = [...new Set(events.map(e => e.source))];
+    const sel = document.getElementById('srcFilter'); const cur = sel.value;
+    if (sel.children.length - 1 !== sources.length) {
+      sel.innerHTML = '<option value="">All sources</option>' + sources.map(s => `<option value="${s}">${s}</option>`).join('');
+      sel.value = cur;
+    }
+    const filtered = events.filter(e =>
+      (!sevF || e.severity === sevF) && (!srcF || e.source === srcF)
+    ).slice(0, 50);
+    document.getElementById('eventList').innerHTML = filtered.map(e => `
+      <div class="grid grid-cols-12 gap-2 px-4 py-1.5 text-xs border-b border-ibm-gray20/40 dark:border-ibm-gray80/40 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90">
+        <div class="col-span-2 font-mono text-ibm-gray70 dark:text-ibm-gray30">${(e.time||'').slice(11,19)}</div>
+        <div class="col-span-1"><span class="chip text-white" style="background:${SEV_COLORS[e.severity]||'#525252'}">${e.severity}</span></div>
+        <div class="col-span-2 font-mono truncate">${e.source}</div>
+        <div class="col-span-7 font-mono truncate">${(e.message||'').replace(/</g,'&lt;')}</div>
+      </div>`).join('') || `<div class="p-8 text-center text-sm text-ibm-gray50 font-mono">No events yet. Connectors take a few seconds to warm up.</div>`;
+  } catch (e) {
+    document.getElementById('eventList').innerHTML = `<div class="p-8 text-center text-sm text-ibm-gray50 font-mono">query-api not reachable. Try: curl http://localhost:8090/healthz</div>`;
+  }
+}
+
+document.getElementById('sevFilter').addEventListener('change', refreshEvents);
+document.getElementById('srcFilter').addEventListener('change', refreshEvents);
+
+/* ============ AI Assistant ============ */
+async function loadPrompts() {
+  try {
+    const r = await fetch(url(8091, '/api/v1/prompts'));
+    const { prompts } = await r.json();
+    document.getElementById('suggestedPrompts').innerHTML = prompts.map(p =>
+      `<button onclick="askAI(${JSON.stringify(p)})" class="w-full text-left text-xs px-3 py-2 border border-ibm-gray20 dark:border-ibm-gray80 hover:border-ibm-blue hover:text-ibm-blue transition">${p}</button>`
+    ).join('');
+    document.getElementById('aiStatus').innerHTML = '· <span class="text-ibm-green">connected</span>';
+  } catch {
+    document.getElementById('suggestedPrompts').innerHTML = '<div class="text-xs text-ibm-red">ai-assistant unreachable. Check: <code>docker logs np-ai-assistant</code></div>';
+    document.getElementById('aiStatus').innerHTML = '· <span class="text-ibm-red">offline</span>';
+  }
+}
+
+const chatHistory = [];
+function renderChat() {
+  const log = document.getElementById('chatLog');
+  if (!chatHistory.length) {
+    log.innerHTML = `<div class="text-center py-6 text-sm text-ibm-gray50 max-w-md mx-auto">
+      <div class="font-mono text-xs uppercase tracking-wider mb-2 text-ibm-blue">Ready</div>
+      <p>Try a suggested prompt on the left, or ask your own question. The assistant reads live data from the Query API to ground its answers.</p>
+    </div>`;
+    return;
+  }
+  log.innerHTML = chatHistory.map(m => {
+    if (m.role === 'user')
+      return `<div class="flex justify-end"><div class="max-w-[80%] bg-ibm-blue text-white px-4 py-2.5 text-sm">${m.text.replace(/</g,'&lt;')}</div></div>`;
+    if (m.role === 'typing')
+      return `<div class="flex justify-start"><div class="bg-ibm-gray10 dark:bg-ibm-gray90 px-4 py-3 text-sm"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div></div>`;
+    const cites = (m.citations||[]).length
+      ? `<div class="mt-3 pt-3 border-t border-ibm-gray20 dark:border-ibm-gray80 text-[11px] font-mono text-ibm-gray70 dark:text-ibm-gray30">
+           Citations (${m.citations.length}): ${m.citations.slice(0,3).map(c => `<span class="text-ibm-blue">${c.severity} ${c.source}</span>`).join(', ')}
+         </div>` : '';
+    return `<div class="flex justify-start"><div class="max-w-[88%] bg-ibm-gray10 dark:bg-ibm-gray90 border-l-4 border-ibm-blue px-4 py-3 text-sm leading-relaxed">${m.text}${cites}</div></div>`;
+  }).join('');
+  log.scrollTop = log.scrollHeight;
+}
+
+async function askAI(text) {
+  if (!text || !text.trim()) return;
+  chatHistory.push({ role:'user', text:text.trim() });
+  chatHistory.push({ role:'typing' });
+  renderChat();
+  try {
+    const r = await fetch(url(8091, '/api/v1/ask'), {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ question:text.trim() }),
+    });
+    const data = await r.json();
+    chatHistory.pop(); // remove typing
+    chatHistory.push({ role:'assistant', text:data.answer, citations:data.citations });
+    document.getElementById('aiLatency').textContent = `${data.latencyMs}ms`;
+  } catch (e) {
+    chatHistory.pop();
+    chatHistory.push({ role:'assistant', text:`<span class="text-ibm-red">Couldn't reach the AI service. Check <code>docker logs np-ai-assistant</code>.</span>` });
+  }
+  renderChat();
+}
+window.askAI = askAI;
+
+document.getElementById('chatForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const inp = document.getElementById('chatInput');
+  const v = inp.value; inp.value = ''; askAI(v);
+});
+
+/* ============ Boot + loops ============ */
+renderChat();
+loadPrompts();
+refreshStatuses();
+refreshStats();
+refreshEvents();
+setInterval(refreshStatuses, 15000);
+setInterval(refreshStats, 3000);
+setInterval(refreshEvents, 4000);
+</script>
+</body>
+</html>
