@@ -6,8 +6,9 @@ This directory contains everything you need to run a sample NiFi flow against th
 
 ```
 nifi/
-├── README.md                          # this file
-├── HOW-TO.md                          # full load-and-trigger guide (read this!)
+├── README.md                          # this file (overview)
+├── STEP-BY-STEP.md                    # ⭐ build the flow manually in NiFi UI
+├── HOW-TO.md                          # full guide — all three loading options
 ├── flows/
 │   └── security-events-router.json   # human-readable reference of the sample flow
 └── scripts/
@@ -59,16 +60,16 @@ Open the NiFi canvas at <https://localhost:8443> to see the flow visually.
 to build the flow programmatically. Fastest path.
 
 **Option 2 — manual UI build**: drag & wire the six processors in the NiFi
-UI by hand. Best for learning. Step-by-step instructions in
-[HOW-TO.md](HOW-TO.md).
+UI by hand. **Best for learning.** Detailed step-by-step instructions in
+[STEP-BY-STEP.md](STEP-BY-STEP.md) — a focused 15-minute tutorial.
 
 **Option 3 — reference JSON**: [`flows/security-events-router.json`](flows/security-events-router.json)
 is a human-readable description (not a NiFi-importable file) listing every
 processor, property, and connection. Use it when adapting the flow.
 
-**See [HOW-TO.md](HOW-TO.md) for the full guide**, including troubleshooting,
-verification, version-specific notes, and extension ideas (PutS3Object,
-PutElasticsearchJson, masking, etc.).
+See [HOW-TO.md](HOW-TO.md) for the consolidated guide covering all three
+options, troubleshooting, version-specific notes, and extension ideas
+(PutS3Object, PutElasticsearchJson, masking, etc.).
 
 ## Why this flow specifically?
 

@@ -1,1 +1,4 @@
-kafka-python==2.0.2
+# kafka-python-ng is a drop-in replacement for kafka-python with Python 3.12+ support.
+# Original kafka-python 2.0.2 vendors an old `six` that breaks on Python 3.12
+# (ModuleNotFoundError: No module named 'kafka.vendor.six.moves').
+kafka-python-ng==2.2.3
