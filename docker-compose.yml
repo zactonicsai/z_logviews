@@ -96,7 +96,7 @@ services:
       - |
         set -e
         echo "Creating Kafka topics..."
-        for t in raw.cloudwatch raw.k8s-events raw.syslog raw.security raw.nginx events.normalized events.info events.warn events.error events.critical metrics.aggregated; do
+        for t in raw.cloudwatch raw.k8s-events raw.syslog raw.security raw.nginx events.normalized events.info events.warn events.error events.critical metrics.aggregated etl.events etl.images etl.documents; do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic $$t --partitions 3 --replication-factor 1
         done
         echo "Topics created."
@@ -337,6 +337,34 @@ services:
     environment:
       QUERY_API_URL: http://query-api:8090
     depends_on: [query-api]
+    networks: [np]
+    <<: *restart
+
+  # ===========================================================================
+  # CUSTOM SERVICES — Python FastAPI: ETL API
+  # Accepts file uploads, extracts text + images, stores in MinIO + ES,
+  # and emits pipeline events to Kafka (etl.events) for NiFi to consume.
+  # ===========================================================================
+  etl-api:
+    build: ./services/etl-api
+    container_name: np-etl-api
+    ports: ["8092:8092"]
+    environment:
+      ES_URL: http://elasticsearch:9200
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: nimbus
+      MINIO_SECRET_KEY: nimbus-secret
+      BUCKET_RAW: np-cold-archive
+      BUCKET_IMAGES: np-cold-events
+      KAFKA_BROKERS: kafka:9092
+      ETL_TOPIC: etl.events
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
     networks: [np]
     <<: *restart
 

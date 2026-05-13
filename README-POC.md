@@ -86,6 +86,7 @@ docker compose down -v    # stop + wipe data volumes
 | **Custom** | sink | go 1.23 (built locally) | Consumes Kafka → ES + Redis + Timescale |
 | **Custom** | query-api | go 1.23 (built locally) | REST API on top of ES + Redis |
 | **Custom** | ai-assistant | python 3.12 (built locally) | FastAPI with simulated AI |
+| **Custom** | etl-api | python 3.12 (built locally) | FastAPI ETL service: upload → extract → transform → load |
 | **Connectors** | connector-cloudwatch | python 3.12 + kafka-python | Synthetic AWS CloudWatch events |
 | **Connectors** | connector-k8s-events | go 1.23 + kafka-go | Synthetic Kubernetes events |
 | **Connectors** | connector-syslog | python 3.12 + kafka-python | Synthetic syslog RFC 5424 |
@@ -167,6 +168,8 @@ docker compose down -v    # stop + wipe data volumes
 | 3000 | Grafana | <http://localhost:3000> | `admin` / `nimbus`, or anonymous viewer |
 | 8090 | Query API (Go) | <http://localhost:8090> | — |
 | 8091 | AI Assistant (Python) | <http://localhost:8091/docs> | — |
+| 8092 | ETL API (Python) | <http://localhost:8092/docs> | — |
+| 8080 | ETL Upload Form | <http://localhost:8080/etl/> | — |
 
 > Tip: run `make urls` to print this list with one command.
 
@@ -184,6 +187,17 @@ The visual dataflow orchestrator. In production it would receive data from the i
 2. Accept the self-signed certificate warning
 3. Log in with `admin` / `ctsBtRBKHRAx69EqUghvvgEvjnaLjFEB`
 4. You'll land on an empty canvas — drag processors from the top toolbar to build a flow
+
+**Or load the sample flow with one command:**
+
+```bash
+make nifi-load    # builds + starts the "Security Pipeline" sample flow
+make nifi-status  # show its current throughput
+```
+
+This routes the `security-sim` connector's stream into severity-specific Kafka topics (`events.critical`, `events.error`, `events.normalized`).
+
+**Want to build it manually instead?** See [nifi/STEP-BY-STEP.md](./nifi/STEP-BY-STEP.md) — a focused 15-minute UI tutorial that walks through each processor click-by-click. Or [nifi/HOW-TO.md](./nifi/HOW-TO.md) for all three loading options plus extension ideas (S3 archive, ES indexing, PII masking).
 
 ### Apache Kafka (KRaft mode, port 9092 internal / 9094 external)
 
@@ -312,6 +326,59 @@ A simulated LLM assistant. Routes by keyword to one of ~10 grounded responses, e
 **OpenAPI docs:** <http://localhost:8091/docs>
 
 This is the staffing of the LLM/RAG layer in the production architecture. Plug in a real LLM here (Claude, GPT, local) by replacing `_generate_answer` and adding embedding-based retrieval.
+
+### ETL API (Python FastAPI, port 8092) + Upload Form (`/etl/`)
+
+A separate FastAPI service that accepts file uploads, extracts text and (where applicable) images, and stores results in MinIO + Elasticsearch. **The Extract-Transform-Load classic, end to end.**
+
+**Two ways to use it:**
+
+- **UI:** open <http://localhost:8080/etl/> for a drag-drop upload form with live pipeline stages, an examples sidebar, and a documents library
+- **API:** `POST /api/v1/etl/upload` (multipart/form-data). OpenAPI docs at <http://localhost:8092/docs>
+
+**Supported file types** (auto-detected):
+
+| Type | Extract | Library |
+|---|---|---|
+| PDF | text + embedded images + OCR per image | `pdfminer.six` + `PyMuPDF` + `pytesseract` |
+| Images (PNG/JPG/etc) | OCR text + dimensions + format | `pytesseract` + `Pillow` |
+| CSV | header detection, sample rows, row/col counts | stdlib `csv` |
+| JSON | schema flatten + top-level key inventory | stdlib `json` |
+| HTML | tag strip + title/heading/link extraction | `BeautifulSoup4` |
+| Plain text / logs / source | UTF-8 decode + line/word/char counts | stdlib |
+
+**Transform stage** applies to all:
+
+- **PII redaction** — regex masks emails, credit-card numbers, SSN-style strings → replaced with `[EMAIL]`, `[CARD]`, `[SSN]`
+- **Language detection** — English-word frequency heuristic → `metadata.language`
+- **SHA-256 hash** — dedup key on first 16 chars of extracted-text hash
+
+**Load stage** writes to three places:
+
+- **MinIO bucket `np-cold-archive`** — original raw file at `raw/{docId}/{filename}`
+- **MinIO bucket `np-cold-events`** — extracted images at `images/{docId}/page_N_img_M.png`
+- **Elasticsearch index `np-documents`** — normalized document JSON with text + metadata for search
+
+**Kafka emissions** — every pipeline stage emits an event to topic `etl.events`:
+
+```
+received → extract.start → extract.done → transform.done
+→ load.minio → load.elasticsearch → complete    (+ error if any stage fails)
+```
+
+These events flow into the **second NiFi sample flow** ("ETL Events Pipeline") that the load-flow script builds — see [nifi/HOW-TO.md](./nifi/HOW-TO.md).
+
+**Quick smoke test:**
+
+```bash
+make etl-test     # uploads a sample CSV, lists what got indexed
+```
+
+Or upload anything by hand at <http://localhost:8080/etl/>, then verify in:
+
+- **MinIO Console** (<http://localhost:9001>) — buckets `np-cold-archive`, `np-cold-events`
+- **Kibana** (<http://localhost:5601>) — create a data view for index `np-documents`
+- **Kafka UI** (<http://localhost:8181>) — topic `etl.events`
 
 ### Sample connectors (5 containers, no exposed ports)
 

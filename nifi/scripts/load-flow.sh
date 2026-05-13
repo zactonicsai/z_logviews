@@ -25,6 +25,7 @@ NIFI_PASS="${NIFI_PASS:-ctsBtRBKHRAx69EqUghvvgEvjnaLjFEB}"
 KAFKA_BROKERS="${KAFKA_BROKERS:-kafka:9092}"
 
 PG_NAME="NimbusPulse Security Pipeline"
+ETL_PG_NAME="NimbusPulse ETL Events Pipeline"
 
 CURL="curl -sk"   # -k accepts NiFi's self-signed cert
 
@@ -207,34 +208,51 @@ ok "root process group: $ROOT_ID"
 case "$cmd" in
   --stop|stop)
     PG_ID=$(find_pg_by_name "$ROOT_ID" "$PG_NAME")
-    [[ -z "$PG_ID" || "$PG_ID" == "null" ]] && { err "flow '$PG_NAME' not found on canvas"; exit 1; }
-    info "stopping process group $PG_ID"
-    stop_pg "$PG_ID"
-    ok "stopped"
+    ETL_PG_ID=$(find_pg_by_name "$ROOT_ID" "$ETL_PG_NAME" || true)
+    if [[ -n "$PG_ID" && "$PG_ID" != "null" ]]; then
+      info "stopping process group $PG_ID ($PG_NAME)"
+      stop_pg "$PG_ID"; ok "stopped"
+    fi
+    if [[ -n "$ETL_PG_ID" && "$ETL_PG_ID" != "null" ]]; then
+      info "stopping process group $ETL_PG_ID ($ETL_PG_NAME)"
+      stop_pg "$ETL_PG_ID"; ok "stopped"
+    fi
     exit 0
     ;;
   --start|start)
     PG_ID=$(find_pg_by_name "$ROOT_ID" "$PG_NAME")
-    [[ -z "$PG_ID" || "$PG_ID" == "null" ]] && { err "flow '$PG_NAME' not found on canvas"; exit 1; }
-    info "starting process group $PG_ID"
-    start_pg "$PG_ID"
-    ok "started"
+    ETL_PG_ID=$(find_pg_by_name "$ROOT_ID" "$ETL_PG_NAME" || true)
+    if [[ -n "$PG_ID" && "$PG_ID" != "null" ]]; then
+      info "starting $PG_NAME"; start_pg "$PG_ID"; ok "started"
+    fi
+    if [[ -n "$ETL_PG_ID" && "$ETL_PG_ID" != "null" ]]; then
+      info "starting $ETL_PG_NAME"; start_pg "$ETL_PG_ID"; ok "started"
+    fi
     exit 0
     ;;
   --status|status)
     PG_ID=$(find_pg_by_name "$ROOT_ID" "$PG_NAME")
-    [[ -z "$PG_ID" || "$PG_ID" == "null" ]] && { err "flow '$PG_NAME' not found on canvas"; exit 1; }
-    flow_status "$PG_ID"
+    ETL_PG_ID=$(find_pg_by_name "$ROOT_ID" "$ETL_PG_NAME" || true)
+    if [[ -n "$PG_ID" && "$PG_ID" != "null" ]]; then
+      b "$PG_NAME"; flow_status "$PG_ID"
+    fi
+    if [[ -n "$ETL_PG_ID" && "$ETL_PG_ID" != "null" ]]; then
+      b "$ETL_PG_NAME"; flow_status "$ETL_PG_ID"
+    fi
     exit 0
     ;;
   --delete|delete)
     PG_ID=$(find_pg_by_name "$ROOT_ID" "$PG_NAME")
-    [[ -z "$PG_ID" || "$PG_ID" == "null" ]] && { err "flow '$PG_NAME' not found on canvas"; exit 1; }
-    info "stopping then deleting process group $PG_ID"
-    stop_pg "$PG_ID" || true
-    sleep 2
-    delete_pg "$PG_ID"
-    ok "deleted"
+    ETL_PG_ID=$(find_pg_by_name "$ROOT_ID" "$ETL_PG_NAME" || true)
+    for id in "$PG_ID" "$ETL_PG_ID"; do
+      if [[ -n "$id" && "$id" != "null" ]]; then
+        info "stopping then deleting $id"
+        stop_pg "$id" || true
+        sleep 2
+        delete_pg "$id"
+        ok "deleted $id"
+      fi
+    done
     exit 0
     ;;
   build|--build|"")
@@ -379,12 +397,173 @@ sleep 1
 start_pg "$PG_ID"
 ok "started"
 
+# ============================================================================
+# SECOND FLOW: ETL Events Pipeline
+# Consumes etl.events, routes by stage, logs to UpdateAttribute (visible in
+# data provenance), and re-publishes errors to events.error.
+# ============================================================================
+
+EXISTING_ETL=$(find_pg_by_name "$ROOT_ID" "$ETL_PG_NAME" || true)
+if [[ -n "$EXISTING_ETL" && "$EXISTING_ETL" != "null" ]]; then
+  info "found existing ETL flow (id $EXISTING_ETL) — deleting & recreating"
+  stop_pg "$EXISTING_ETL" || true
+  sleep 2
+  delete_pg "$EXISTING_ETL"
+fi
+
+b "Creating process group '$ETL_PG_NAME'"
+ETL_PG_ID=$(create_pg "$ROOT_ID" "$ETL_PG_NAME")
+ok "process group: $ETL_PG_ID"
+
+# Place it below the first flow on the canvas
+api PUT "/process-groups/$ETL_PG_ID" "$(jq -nc --arg id "$ETL_PG_ID" '{
+  revision:{version:0,clientId:"loader"},
+  component:{id:$id, position:{x:120,y:500}}
+}')" >/dev/null 2>&1 || true
+
+# ETL Processor 1: ConsumeKafka — reads etl.events
+b "[ETL] Creating ConsumeKafka (etl.events)"
+ETL_CONSUME_PROPS=$(jq -nc --arg brokers "$KAFKA_BROKERS" '{
+  "bootstrap.servers": $brokers,
+  "topic": "etl.events",
+  "topic_type": "names",
+  "group.id": "nifi-etl-events-pipeline",
+  "auto.offset.reset": "latest",
+  "Max Poll Records": "100",
+  "message-demarcator": "\n"
+}')
+ETL_CONSUME_ID=$(create_processor "$ETL_PG_ID" "Consume etl.events" \
+  "org.apache.nifi.processors.kafka.pubsub.ConsumeKafka_2_6" \
+  0 0 "$ETL_CONSUME_PROPS")
+ok "[ETL] ConsumeKafka: $ETL_CONSUME_ID"
+
+# ETL Processor 2: EvaluateJsonPath — extract stage, severity, docId, sourceFile
+b "[ETL] Creating EvaluateJsonPath (extract stage, severity, docId)"
+ETL_EVAL_PROPS=$(jq -nc '{
+  "Destination": "flowfile-attribute",
+  "Return Type": "auto-detect",
+  "Path Not Found Behavior": "ignore",
+  "Null Value Representation": "empty string",
+  "stage": "$.payload.stage",
+  "severity": "$.severity",
+  "doc_id": "$.payload.docId",
+  "source_file": "$.payload.sourceFile",
+  "etl_extractor": "$.payload.extractor"
+}')
+ETL_EVAL_ID=$(create_processor "$ETL_PG_ID" "Extract ETL fields" \
+  "org.apache.nifi.processors.standard.EvaluateJsonPath" \
+  300 0 "$ETL_EVAL_PROPS")
+set_proc_relationships_autoterminate "$ETL_EVAL_ID" '["failure","unmatched"]'
+ok "[ETL] EvaluateJsonPath: $ETL_EVAL_ID"
+
+# ETL Processor 3: UpdateAttribute — log every event passing through
+# (UpdateAttribute appears in data provenance and can write to bulletin board)
+b "[ETL] Creating UpdateAttribute (annotate for logging)"
+ETL_UPDATE_PROPS=$(jq -nc '{
+  "log.timestamp": "${now():toNumber()}",
+  "log.message":   "ETL ${stage} for ${source_file} (doc=${doc_id})",
+  "pipeline":      "nifi-etl-events",
+  "trace_id":      "${UUID()}"
+}')
+ETL_UPDATE_ID=$(create_processor "$ETL_PG_ID" "Log + annotate ETL event" \
+  "org.apache.nifi.processors.attributes.UpdateAttribute" \
+  600 0 "$ETL_UPDATE_PROPS")
+ok "[ETL] UpdateAttribute: $ETL_UPDATE_ID"
+
+# ETL Processor 4: RouteOnAttribute — split error vs complete vs intermediate
+b "[ETL] Creating RouteOnAttribute (route ETL stages)"
+ETL_ROUTE_PROPS=$(jq -nc '{
+  "Routing Strategy": "Route to Property name",
+  "error":      "${severity:equals(\"ERROR\")}",
+  "complete":   "${stage:equals(\"complete\")}",
+  "extract":    "${stage:startsWith(\"extract\")}",
+  "load":       "${stage:startsWith(\"load\")}"
+}')
+ETL_ROUTE_ID=$(create_processor "$ETL_PG_ID" "Route by ETL stage" \
+  "org.apache.nifi.processors.standard.RouteOnAttribute" \
+  900 0 "$ETL_ROUTE_PROPS")
+ok "[ETL] RouteOnAttribute: $ETL_ROUTE_ID"
+
+# ETL Processor 5a: PublishKafka — errors out to events.error
+b "[ETL] Creating PublishKafka (events.error for ETL failures)"
+ETL_PUB_ERR_PROPS=$(jq -nc --arg brokers "$KAFKA_BROKERS" '{
+  "bootstrap.servers": $brokers,
+  "topic": "events.error",
+  "acks": "all",
+  "delivery-guarantee": "guarantee-replicated-delivery"
+}')
+ETL_PUB_ERR_ID=$(create_processor "$ETL_PG_ID" "Publish ETL errors → events.error" \
+  "org.apache.nifi.processors.kafka.pubsub.PublishKafka_2_6" \
+  1200 -200 "$ETL_PUB_ERR_PROPS")
+set_proc_relationships_autoterminate "$ETL_PUB_ERR_ID" '["success","failure"]'
+ok "[ETL] PublishKafka errors: $ETL_PUB_ERR_ID"
+
+# ETL Processor 5b: PublishKafka — completes to events.normalized
+b "[ETL] Creating PublishKafka (events.normalized for completed)"
+ETL_PUB_NORM_PROPS=$(jq -nc --arg brokers "$KAFKA_BROKERS" '{
+  "bootstrap.servers": $brokers,
+  "topic": "events.normalized",
+  "acks": "all",
+  "delivery-guarantee": "guarantee-replicated-delivery"
+}')
+ETL_PUB_NORM_ID=$(create_processor "$ETL_PG_ID" "Publish ETL complete → events.normalized" \
+  "org.apache.nifi.processors.kafka.pubsub.PublishKafka_2_6" \
+  1200 0 "$ETL_PUB_NORM_PROPS")
+set_proc_relationships_autoterminate "$ETL_PUB_NORM_ID" '["success","failure"]'
+ok "[ETL] PublishKafka complete: $ETL_PUB_NORM_ID"
+
+# ETL Processor 5c: PublishKafka — extract events to etl.documents (for downstream indexing)
+b "[ETL] Creating PublishKafka (etl.documents for extracts/loads)"
+ETL_PUB_DOCS_PROPS=$(jq -nc --arg brokers "$KAFKA_BROKERS" '{
+  "bootstrap.servers": $brokers,
+  "topic": "etl.documents",
+  "acks": "all",
+  "delivery-guarantee": "guarantee-replicated-delivery"
+}')
+ETL_PUB_DOCS_ID=$(create_processor "$ETL_PG_ID" "Publish stage events → etl.documents" \
+  "org.apache.nifi.processors.kafka.pubsub.PublishKafka_2_6" \
+  1200 200 "$ETL_PUB_DOCS_PROPS")
+set_proc_relationships_autoterminate "$ETL_PUB_DOCS_ID" '["success","failure"]'
+ok "[ETL] PublishKafka docs: $ETL_PUB_DOCS_ID"
+
+# ETL Connections
+b "[ETL] Wiring connections"
+create_connection "$ETL_PG_ID" "$ETL_CONSUME_ID" "$ETL_EVAL_ID"     "success"     >/dev/null
+ok "[ETL] consume → evaluate"
+create_connection "$ETL_PG_ID" "$ETL_EVAL_ID"    "$ETL_UPDATE_ID"   "matched"     >/dev/null
+ok "[ETL] evaluate → update-attribute"
+create_connection "$ETL_PG_ID" "$ETL_UPDATE_ID"  "$ETL_ROUTE_ID"    "success"     >/dev/null
+ok "[ETL] update → route"
+create_connection "$ETL_PG_ID" "$ETL_ROUTE_ID"   "$ETL_PUB_ERR_ID"  "error"       >/dev/null
+ok "[ETL] route → publish errors"
+create_connection "$ETL_PG_ID" "$ETL_ROUTE_ID"   "$ETL_PUB_NORM_ID" "complete"    >/dev/null
+ok "[ETL] route → publish completes"
+# Send extract and load stages to etl.documents (multi-relationship connection)
+create_connection "$ETL_PG_ID" "$ETL_ROUTE_ID"   "$ETL_PUB_DOCS_ID" "extract"     >/dev/null
+ok "[ETL] route(extract) → publish docs"
+create_connection "$ETL_PG_ID" "$ETL_ROUTE_ID"   "$ETL_PUB_DOCS_ID" "load"        >/dev/null
+ok "[ETL] route(load) → publish docs"
+# Unmatched stages still need a destination — also send to docs
+create_connection "$ETL_PG_ID" "$ETL_ROUTE_ID"   "$ETL_PUB_DOCS_ID" "unmatched"   >/dev/null
+ok "[ETL] route(unmatched) → publish docs"
+
+# Start the ETL flow
+b "Starting ETL process group"
+sleep 1
+start_pg "$ETL_PG_ID"
+ok "started"
+
 echo
-b "Flow loaded & running"
-echo "  Process Group: $PG_NAME ($PG_ID)"
+b "Both flows loaded & running"
+echo "  Flow 1: $PG_NAME ($PG_ID)"
+echo "          raw.security → events.{critical,error,normalized}"
+echo "  Flow 2: $ETL_PG_NAME ($ETL_PG_ID)"
+echo "          etl.events → events.error | events.normalized | etl.documents"
+echo
 echo "  Open NiFi UI:  $NIFI_URL"
 echo "  Watch traffic: docker exec np-kafka /opt/kafka/bin/kafka-console-consumer.sh \\"
 echo "                   --bootstrap-server localhost:9092 \\"
-echo "                   --topic events.critical --from-beginning"
+echo "                   --topic etl.documents --from-beginning"
+echo "  Trigger ETL:   open http://localhost:8080/etl/ and upload a file"
 echo "  Status:        $0 --status"
 echo "  Stop:          $0 --stop"

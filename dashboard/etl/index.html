@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en" class="">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NimbusPulse — ETL Upload</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: { extend: {
+      colors: { ibm: {
+        blue:'#0f62fe', blue70:'#0043ce', blue80:'#002d9c',
+        blue30:'#a6c8ff', blue20:'#d0e2ff', blue10:'#edf5ff',
+        cyan:'#1192e8', teal:'#009d9a', green:'#24a148',
+        yellow:'#f1c21b', orange:'#ff832b', red:'#da1e28',
+        magenta:'#ee5396', purple:'#8a3ffc',
+        gray10:'#f4f4f4', gray20:'#e0e0e0', gray30:'#c6c6c6',
+        gray50:'#8d8d8d', gray70:'#525252', gray80:'#393939',
+        gray90:'#262626', gray100:'#161616'
+      }},
+      fontFamily: {
+        sans:['"IBM Plex Sans"','system-ui','sans-serif'],
+        mono:['"IBM Plex Mono"','ui-monospace','monospace']
+      }
+    }}
+  }
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  body { font-family: 'IBM Plex Sans', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  .font-mono { font-family: 'IBM Plex Mono', monospace; }
+  .grid-bg {
+    background-image:
+      linear-gradient(to right, rgba(15,98,254,0.07) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(15,98,254,0.07) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .dark .grid-bg {
+    background-image:
+      linear-gradient(to right, rgba(166,200,255,0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(166,200,255,0.06) 1px, transparent 1px);
+  }
+  @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(1.5)} }
+  .live-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
+  @keyframes progress-stripes { from { background-position: 0 0; } to { background-position: 40px 0; } }
+  .progress-stripes {
+    background-image: linear-gradient(45deg,
+      rgba(255,255,255,.2) 25%, transparent 25%,
+      transparent 50%, rgba(255,255,255,.2) 50%,
+      rgba(255,255,255,.2) 75%, transparent 75%);
+    background-size: 40px 40px;
+    animation: progress-stripes 1s linear infinite;
+  }
+  .chip { display:inline-flex; align-items:center; gap:.25rem; padding:.125rem .5rem; font-size:.7rem; font-weight:500; font-family:'IBM Plex Mono', monospace; letter-spacing:.02em; }
+  .stage-dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+  .stage-pending { background:#c6c6c6; }
+  .stage-active  { background:#0f62fe; animation: pulse-dot 1s ease-in-out infinite; }
+  .stage-done    { background:#24a148; }
+  .stage-error   { background:#da1e28; }
+  *:focus-visible { outline: 2px solid #0f62fe; outline-offset: 2px; }
+  ::-webkit-scrollbar { width:8px; height:8px; }
+  ::-webkit-scrollbar-thumb { background:#c6c6c6; }
+  .dark ::-webkit-scrollbar-thumb { background:#525252; }
+</style>
+</head>
+
+<body class="bg-white text-ibm-gray100 dark:bg-ibm-gray100 dark:text-ibm-gray10 transition-colors">
+
+<!-- HEADER -->
+<header class="sticky top-0 z-40 border-b border-ibm-gray20 dark:border-ibm-gray80 bg-white/95 dark:bg-ibm-gray100/95 backdrop-blur">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <a href="/" class="flex items-center gap-2.5">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+          <rect x="2" y="2" width="28" height="28" fill="#0f62fe"/>
+          <path d="M8 10h16M8 16h10M8 22h13" stroke="white" stroke-width="2"/>
+          <circle cx="22" cy="16" r="2" fill="white"/>
+          <circle cx="25" cy="22" r="2" fill="white"/>
+        </svg>
+        <div class="leading-tight">
+          <div class="font-semibold text-sm tracking-tight">NimbusPulse</div>
+          <div class="text-[10px] font-mono text-ibm-gray50 uppercase tracking-wider">ETL Upload</div>
+        </div>
+      </a>
+      <nav class="hidden sm:flex items-center gap-1 text-sm ml-4">
+        <a href="/" class="px-3 py-1.5 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">← Dashboard</a>
+        <span class="px-3 py-1.5 text-ibm-blue border-b-2 border-ibm-blue">ETL</span>
+      </nav>
+    </div>
+    <div class="flex items-center gap-3">
+      <span id="apiStatus" class="text-xs font-mono text-ibm-gray70 dark:text-ibm-gray30">checking ETL API…</span>
+      <button id="themeToggle" class="p-2 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">
+        <svg id="iconSun" class="w-4 h-4 hidden dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg id="iconMoon" class="w-4 h-4 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- HERO -->
+<section class="grid-bg border-b border-ibm-gray20 dark:border-ibm-gray80">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue mb-2">§ ETL Pipeline · Extract → Transform → Load</div>
+    <h1 class="text-3xl sm:text-4xl font-light tracking-tight">Upload anything. We'll extract, normalize, and index it.</h1>
+    <p class="mt-3 text-sm sm:text-base text-ibm-gray70 dark:text-ibm-gray30 max-w-3xl">
+      Drop a file below. The ETL API detects the format, extracts text (and images, for PDFs), redacts PII, then stores results in <b>MinIO</b> (raw + images) and <b>Elasticsearch</b> (searchable text). Each stage emits an event to the <code class="font-mono text-ibm-blue">etl.events</code> Kafka topic, where NiFi can pick it up.
+    </p>
+  </div>
+</section>
+
+<!-- UPLOAD ZONE -->
+<section class="border-b border-ibm-gray20 dark:border-ibm-gray80">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <div class="grid lg:grid-cols-3 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80">
+
+      <!-- LEFT: Drop zone -->
+      <div class="lg:col-span-2 bg-white dark:bg-ibm-gray100 p-6">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-3">Step 1 · Pick a file</div>
+
+        <label id="dropZone" for="fileInput"
+               class="block border-2 border-dashed border-ibm-gray30 dark:border-ibm-gray70 p-10 text-center cursor-pointer hover:border-ibm-blue hover:bg-ibm-blue10 dark:hover:bg-ibm-blue80/10 transition">
+          <svg class="mx-auto w-12 h-12 text-ibm-gray50 mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+          </svg>
+          <div class="text-sm font-medium mb-1">Drop a file here, or click to select</div>
+          <div class="text-xs text-ibm-gray70 dark:text-ibm-gray30">PDF · images · CSV · JSON · HTML · plain text · logs · code</div>
+          <div class="text-[10px] font-mono text-ibm-gray50 mt-3">max 50 MB</div>
+          <input id="fileInput" type="file" class="hidden"
+                 accept=".pdf,.png,.jpg,.jpeg,.gif,.bmp,.tiff,.webp,.csv,.json,.html,.htm,.txt,.md,.log,.py,.js,.go,.yaml,.yml" />
+        </label>
+
+        <!-- Selected file panel -->
+        <div id="fileInfo" class="hidden mt-5">
+          <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">Selected file</div>
+          <div class="border border-ibm-gray20 dark:border-ibm-gray80 p-4 bg-ibm-gray10/40 dark:bg-ibm-gray90/40">
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+              <div>
+                <div class="text-ibm-gray50">Filename</div>
+                <div id="fileName" class="font-medium text-sm break-all">—</div>
+              </div>
+              <div>
+                <div class="text-ibm-gray50">Size</div>
+                <div id="fileSize" class="font-medium text-sm">—</div>
+              </div>
+              <div>
+                <div class="text-ibm-gray50">MIME</div>
+                <div id="fileMime" class="font-medium text-sm break-all">—</div>
+              </div>
+              <div>
+                <div class="text-ibm-gray50">Will use extractor</div>
+                <div id="fileExtractor" class="font-medium text-sm text-ibm-blue">—</div>
+              </div>
+            </div>
+            <div class="flex gap-2 mt-4">
+              <button id="uploadBtn" class="px-5 py-2 bg-ibm-blue text-white text-sm font-medium hover:bg-ibm-blue70 transition disabled:opacity-50">Run ETL Pipeline →</button>
+              <button id="clearBtn" class="px-5 py-2 border border-ibm-gray30 dark:border-ibm-gray70 text-sm hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Clear</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stages -->
+        <div id="stages" class="hidden mt-6">
+          <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-3">Step 2 · Pipeline</div>
+          <ol class="space-y-2">
+            <li class="flex items-center gap-3 text-sm">
+              <span id="stage-received" class="stage-dot stage-pending"></span>
+              <span class="font-mono text-xs w-28">received</span>
+              <span class="text-ibm-gray70 dark:text-ibm-gray30">file accepted by ETL API</span>
+            </li>
+            <li class="flex items-center gap-3 text-sm">
+              <span id="stage-extract" class="stage-dot stage-pending"></span>
+              <span class="font-mono text-xs w-28">extract</span>
+              <span class="text-ibm-gray70 dark:text-ibm-gray30">parse text + images per file type</span>
+            </li>
+            <li class="flex items-center gap-3 text-sm">
+              <span id="stage-transform" class="stage-dot stage-pending"></span>
+              <span class="font-mono text-xs w-28">transform</span>
+              <span class="text-ibm-gray70 dark:text-ibm-gray30">PII redaction · language detect · hash</span>
+            </li>
+            <li class="flex items-center gap-3 text-sm">
+              <span id="stage-minio" class="stage-dot stage-pending"></span>
+              <span class="font-mono text-xs w-28">load.minio</span>
+              <span class="text-ibm-gray70 dark:text-ibm-gray30">raw + images → MinIO buckets</span>
+            </li>
+            <li class="flex items-center gap-3 text-sm">
+              <span id="stage-es" class="stage-dot stage-pending"></span>
+              <span class="font-mono text-xs w-28">load.elasticsearch</span>
+              <span class="text-ibm-gray70 dark:text-ibm-gray30">searchable index → np-documents</span>
+            </li>
+            <li class="flex items-center gap-3 text-sm">
+              <span id="stage-complete" class="stage-dot stage-pending"></span>
+              <span class="font-mono text-xs w-28">complete</span>
+              <span class="text-ibm-gray70 dark:text-ibm-gray30">final event emitted to Kafka</span>
+            </li>
+          </ol>
+          <div id="progressBar" class="hidden mt-4 h-1 bg-ibm-gray20 dark:bg-ibm-gray80 overflow-hidden">
+            <div class="h-full progress-stripes bg-ibm-blue"></div>
+          </div>
+        </div>
+
+        <!-- Result -->
+        <div id="result" class="hidden mt-6">
+          <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-3">Step 3 · Result</div>
+          <div id="resultBody" class="border border-ibm-green/30 bg-ibm-green/5 p-4 text-sm space-y-3"></div>
+        </div>
+
+        <!-- Error -->
+        <div id="error" class="hidden mt-6">
+          <div class="border border-ibm-red/30 bg-ibm-red/5 p-4 text-sm">
+            <div class="font-mono text-xs uppercase tracking-wider text-ibm-red mb-2">Error</div>
+            <div id="errorBody" class="font-mono text-xs"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Examples -->
+      <aside class="bg-white dark:bg-ibm-gray100 p-6 max-h-[680px] overflow-y-auto">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-3">Sample ETL flows</div>
+        <div id="examplesList" class="space-y-3">
+          <div class="text-xs text-ibm-gray50 font-mono">loading examples…</div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- DOCUMENTS LIBRARY -->
+<section class="border-b border-ibm-gray20 dark:border-ibm-gray80 bg-ibm-gray10/40 dark:bg-ibm-gray100">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue">§ Library · processed documents</div>
+        <h2 class="text-2xl font-light mt-1">Browse what's already indexed</h2>
+      </div>
+      <div class="flex gap-2 items-center">
+        <input id="docSearch" type="text" placeholder="search text or filename…" class="px-3 py-1.5 text-sm border border-ibm-gray30 dark:border-ibm-gray70 bg-white dark:bg-ibm-gray100 font-mono w-64" />
+        <button id="refreshDocs" class="px-3 py-1.5 text-xs font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">↻ refresh</button>
+      </div>
+    </div>
+    <div id="docList" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80"></div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="border-b border-ibm-gray20 dark:border-ibm-gray80">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue mb-2">§ Under the hood</div>
+    <h2 class="text-2xl font-light mb-6">What happens when you click "Run ETL Pipeline"</h2>
+    <div class="grid md:grid-cols-3 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80">
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">1. Extract</div>
+        <p class="text-sm text-ibm-gray70 dark:text-ibm-gray30">The browser POSTs the file to <code class="font-mono">/api/v1/etl/upload</code>. The ETL API detects the type from MIME + extension and picks an extractor: <code class="font-mono">pdfminer.six + PyMuPDF</code> for PDFs (text + embedded images), <code class="font-mono">pytesseract</code> for image OCR, parsers for CSV/JSON/HTML, plain UTF-8 for everything else.</p>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">2. Transform</div>
+        <p class="text-sm text-ibm-gray70 dark:text-ibm-gray30">The extracted text is run through a redaction pass that masks emails, credit-card numbers, and SSN-style strings. A simple English-word frequency check labels the language. A SHA-256 hash supports dedup. All of this gets attached as <code class="font-mono">metadata</code>.</p>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">3. Load</div>
+        <p class="text-sm text-ibm-gray70 dark:text-ibm-gray30">The raw file is written to MinIO bucket <code class="font-mono text-ibm-blue">np-cold-archive</code>; extracted images go to <code class="font-mono text-ibm-blue">np-cold-events</code>. The normalized document — with text, metadata, image references — is indexed in Elasticsearch under <code class="font-mono text-ibm-blue">np-documents</code>.</p>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">Pipeline events</div>
+        <p class="text-sm text-ibm-gray70 dark:text-ibm-gray30">Every stage emits a JSON event to Kafka topic <code class="font-mono text-ibm-blue">etl.events</code> with shape <code class="font-mono">{stage, docId, sourceFile, …}</code>. Eight events per upload: received → extract.start → extract.done → transform.done → load.minio → load.elasticsearch → complete.</p>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">NiFi integration</div>
+        <p class="text-sm text-ibm-gray70 dark:text-ibm-gray30">The shipped sample flow consumes <code class="font-mono">etl.events</code>, routes by <code class="font-mono">stage</code>, and republishes errors to <code class="font-mono">events.error</code> and completes to <code class="font-mono">events.normalized</code> — same downstream as every other connector.</p>
+      </div>
+      <div class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">Verify externally</div>
+        <p class="text-sm text-ibm-gray70 dark:text-ibm-gray30 mb-2">After an upload, see the data in:</p>
+        <ul class="text-xs font-mono space-y-1">
+          <li>• <a href="http://localhost:9001" target="_blank" class="text-ibm-blue hover:underline">MinIO Console</a> — buckets np-cold-archive, np-cold-events</li>
+          <li>• <a href="http://localhost:5601" target="_blank" class="text-ibm-blue hover:underline">Kibana</a> — index np-documents</li>
+          <li>• <a href="http://localhost:8181" target="_blank" class="text-ibm-blue hover:underline">Kafka UI</a> — topic etl.events</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="bg-ibm-gray10/40 dark:bg-ibm-gray100">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col sm:flex-row justify-between gap-3 text-xs text-ibm-gray70 dark:text-ibm-gray30 font-mono">
+    <div>NimbusPulse ETL · Python FastAPI · MinIO + Elasticsearch + Kafka</div>
+    <div><a href="http://localhost:8092/docs" target="_blank" class="text-ibm-blue hover:underline">OpenAPI docs →</a></div>
+  </div>
+</footer>
+
+<!-- DOC DETAIL MODAL -->
+<div id="modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4">
+  <div class="absolute inset-0 bg-ibm-gray100/70 backdrop-blur-sm" onclick="closeModal()"></div>
+  <div class="relative bg-white dark:bg-ibm-gray90 border border-ibm-gray20 dark:border-ibm-gray80 max-w-3xl w-full max-h-[85vh] overflow-y-auto">
+    <div class="px-5 py-3 border-b border-ibm-gray20 dark:border-ibm-gray80 flex items-center justify-between sticky top-0 bg-white dark:bg-ibm-gray90">
+      <h3 id="modalTitle" class="font-medium text-sm">—</h3>
+      <button onclick="closeModal()" class="text-ibm-gray70 dark:text-ibm-gray30 hover:text-ibm-blue text-xl leading-none">×</button>
+    </div>
+    <div id="modalBody" class="p-5 text-sm"></div>
+  </div>
+</div>
+
+<script>
+const HOST = window.location.hostname || 'localhost';
+const ETL = `http://${HOST}:8092`;
+
+/* ============ Theme ============ */
+(() => {
+  const saved = localStorage.getItem('np_theme');
+  if (saved === 'dark' || (!saved && matchMedia('(prefers-color-scheme: dark)').matches))
+    document.documentElement.classList.add('dark');
+})();
+document.getElementById('themeToggle').addEventListener('click', () => {
+  document.documentElement.classList.toggle('dark');
+  localStorage.setItem('np_theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+});
+
+/* ============ Helpers ============ */
+function humanSize(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+  if (b < 1024*1024*1024) return (b/1024/1024).toFixed(2) + ' MB';
+  return (b/1024/1024/1024).toFixed(2) + ' GB';
+}
+
+function pickExtractor(name, mime) {
+  const n = name.toLowerCase();
+  if (mime === 'application/pdf' || n.endsWith('.pdf')) return 'pdf (pdfminer + PyMuPDF)';
+  if ((mime || '').startsWith('image/') || /\.(png|jpe?g|gif|bmp|tiff|webp)$/.test(n)) return 'image (OCR via tesseract)';
+  if (mime === 'text/csv' || n.endsWith('.csv')) return 'csv (header + sample)';
+  if (mime === 'application/json' || n.endsWith('.json')) return 'json (schema inference)';
+  if (mime === 'text/html' || /\.html?$/.test(n)) return 'html (BeautifulSoup)';
+  return 'text (plain UTF-8)';
+}
+
+function setStage(id, state) {
+  const el = document.getElementById('stage-' + id);
+  if (!el) return;
+  el.className = 'stage-dot stage-' + state;
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ============ API status ============ */
+async function checkApi() {
+  try {
+    const r = await fetch(`${ETL}/healthz`);
+    if (!r.ok) throw new Error('unhealthy');
+    const data = await r.json();
+    const ok = data.components.pdf && data.components.ocr;
+    document.getElementById('apiStatus').innerHTML =
+      `<span class="live-dot w-2 h-2 rounded-full bg-ibm-green inline-block mr-1"></span>ETL API ready${ok ? '' : ' (limited)'}`;
+  } catch {
+    document.getElementById('apiStatus').innerHTML =
+      `<span class="w-2 h-2 rounded-full bg-ibm-red inline-block mr-1"></span><span class="text-ibm-red">ETL API offline</span>`;
+  }
+}
+
+/* ============ Examples ============ */
+async function loadExamples() {
+  try {
+    const r = await fetch(`${ETL}/api/v1/etl/examples`);
+    const { examples } = await r.json();
+    document.getElementById('examplesList').innerHTML = examples.map((ex, i) => `
+      <details class="border border-ibm-gray20 dark:border-ibm-gray80 group" ${i === 0 ? 'open' : ''}>
+        <summary class="px-3 py-2 cursor-pointer hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 list-none">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-medium">${escapeHtml(ex.name)}</span>
+            <span class="text-[10px] font-mono text-ibm-gray50 group-open:rotate-90 transition">▸</span>
+          </div>
+          <div class="text-[10px] font-mono text-ibm-blue mt-1">${escapeHtml(ex.input)}</div>
+        </summary>
+        <div class="px-3 py-3 bg-ibm-gray10/30 dark:bg-ibm-gray90/30 text-xs space-y-2 border-t border-ibm-gray20 dark:border-ibm-gray80">
+          <div><span class="font-mono text-[10px] uppercase text-ibm-gray50">Extract</span><div class="mt-0.5">${escapeHtml(ex.extract)}</div></div>
+          <div><span class="font-mono text-[10px] uppercase text-ibm-gray50">Transform</span><div class="mt-0.5">${escapeHtml(ex.transform)}</div></div>
+          <div><span class="font-mono text-[10px] uppercase text-ibm-gray50">Load</span><div class="mt-0.5">${escapeHtml(ex.load)}</div></div>
+          <div><span class="font-mono text-[10px] uppercase text-ibm-gray50">Use case</span><div class="mt-0.5 italic">${escapeHtml(ex.useCase)}</div></div>
+        </div>
+      </details>
+    `).join('');
+  } catch {
+    document.getElementById('examplesList').innerHTML =
+      `<div class="text-xs text-ibm-red font-mono">examples unreachable — check ETL API</div>`;
+  }
+}
+
+/* ============ File selection ============ */
+let currentFile = null;
+const fileInput = document.getElementById('fileInput');
+const dropZone = document.getElementById('dropZone');
+const fileInfo = document.getElementById('fileInfo');
+
+['dragenter','dragover'].forEach(ev =>
+  dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.add('border-ibm-blue','bg-ibm-blue10'); })
+);
+['dragleave','drop'].forEach(ev =>
+  dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.remove('border-ibm-blue','bg-ibm-blue10'); })
+);
+dropZone.addEventListener('drop', e => {
+  if (e.dataTransfer.files.length) selectFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => {
+  if (e.target.files.length) selectFile(e.target.files[0]);
+});
+
+function selectFile(f) {
+  currentFile = f;
+  document.getElementById('fileName').textContent = f.name;
+  document.getElementById('fileSize').textContent = humanSize(f.size);
+  document.getElementById('fileMime').textContent = f.type || '—';
+  document.getElementById('fileExtractor').textContent = pickExtractor(f.name, f.type);
+  fileInfo.classList.remove('hidden');
+  document.getElementById('stages').classList.add('hidden');
+  document.getElementById('result').classList.add('hidden');
+  document.getElementById('error').classList.add('hidden');
+}
+
+document.getElementById('clearBtn').addEventListener('click', () => {
+  currentFile = null;
+  fileInput.value = '';
+  fileInfo.classList.add('hidden');
+  document.getElementById('stages').classList.add('hidden');
+  document.getElementById('result').classList.add('hidden');
+  document.getElementById('error').classList.add('hidden');
+});
+
+/* ============ Upload ============ */
+document.getElementById('uploadBtn').addEventListener('click', uploadFile);
+
+async function uploadFile() {
+  if (!currentFile) return;
+
+  // Reset stages
+  ['received','extract','transform','minio','es','complete'].forEach(s => setStage(s, 'pending'));
+  document.getElementById('stages').classList.remove('hidden');
+  document.getElementById('result').classList.add('hidden');
+  document.getElementById('error').classList.add('hidden');
+  document.getElementById('progressBar').classList.remove('hidden');
+  document.getElementById('uploadBtn').disabled = true;
+
+  // The API is synchronous — we can't watch real stages without WebSockets.
+  // Animate plausible progress while the request is in flight.
+  const animateStages = async () => {
+    const sequence = ['received','extract','transform','minio','es'];
+    for (const s of sequence) {
+      setStage(s, 'active');
+      await new Promise(r => setTimeout(r, 250));
+    }
+  };
+  animateStages();
+
+  try {
+    const fd = new FormData();
+    fd.append('file', currentFile);
+    const r = await fetch(`${ETL}/api/v1/etl/upload`, { method: 'POST', body: fd });
+
+    if (!r.ok) {
+      const detail = await r.text();
+      throw new Error(`${r.status} ${r.statusText} — ${detail}`);
+    }
+
+    const result = await r.json();
+    ['received','extract','transform','minio','es','complete'].forEach(s => setStage(s, 'done'));
+    document.getElementById('progressBar').classList.add('hidden');
+
+    // Render result
+    document.getElementById('resultBody').innerHTML = `
+      <div class="font-medium text-ibm-green flex items-center gap-2">
+        ✓ Processed in ${result.durationMs}ms
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs font-mono mt-3">
+        <div><div class="text-ibm-gray50">docId</div><div class="break-all">${escapeHtml(result.docId)}</div></div>
+        <div><div class="text-ibm-gray50">media type</div><div>${escapeHtml(result.mediaType)}</div></div>
+        <div><div class="text-ibm-gray50">extractor</div><div>${escapeHtml(result.extractor)}</div></div>
+        <div><div class="text-ibm-gray50">word count</div><div>${result.wordCount.toLocaleString()}</div></div>
+        <div><div class="text-ibm-gray50">page count</div><div>${result.pageCount}</div></div>
+        <div><div class="text-ibm-gray50">images extracted</div><div>${result.imageCount}</div></div>
+      </div>
+      <div class="flex flex-wrap gap-2 mt-3">
+        <button onclick="viewDoc('${result.docId}')" class="px-3 py-1.5 text-xs font-mono bg-ibm-blue text-white hover:bg-ibm-blue70 transition">View extracted content →</button>
+        <a href="http://localhost:9001/browser/np-cold-archive" target="_blank" class="px-3 py-1.5 text-xs font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Open MinIO →</a>
+        <a href="http://localhost:5601" target="_blank" class="px-3 py-1.5 text-xs font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Open Kibana →</a>
+      </div>`;
+    document.getElementById('result').classList.remove('hidden');
+    loadDocs();
+  } catch (e) {
+    ['received','extract','transform','minio','es','complete'].forEach(s => {
+      const el = document.getElementById('stage-' + s);
+      if (el && el.className.includes('stage-active')) setStage(s, 'error');
+    });
+    document.getElementById('progressBar').classList.add('hidden');
+    document.getElementById('errorBody').textContent = String(e.message || e);
+    document.getElementById('error').classList.remove('hidden');
+  } finally {
+    document.getElementById('uploadBtn').disabled = false;
+  }
+}
+
+/* ============ Library ============ */
+async function loadDocs() {
+  const q = document.getElementById('docSearch').value.trim();
+  const url = q
+    ? `${ETL}/api/v1/etl/documents?size=24&q=${encodeURIComponent(q)}`
+    : `${ETL}/api/v1/etl/documents?size=24`;
+  try {
+    const r = await fetch(url);
+    const { hits } = await r.json();
+    if (!hits || !hits.length) {
+      document.getElementById('docList').innerHTML =
+        `<div class="bg-white dark:bg-ibm-gray100 p-8 text-center text-sm text-ibm-gray50 font-mono col-span-full">
+           No documents yet. Upload one above.
+         </div>`;
+      return;
+    }
+    document.getElementById('docList').innerHTML = hits.map(d => `
+      <button onclick="viewDoc('${d.docId}')" class="bg-white dark:bg-ibm-gray100 p-4 text-left hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">
+        <div class="flex items-center justify-between mb-2">
+          <span class="chip bg-ibm-blue text-white">${escapeHtml((d.extractor || '').split(' ')[0].toUpperCase())}</span>
+          <span class="text-[10px] font-mono text-ibm-gray50">${(d.extractedAt || '').slice(11,19)}</span>
+        </div>
+        <div class="text-sm font-medium truncate">${escapeHtml(d.sourceFile || d.docId)}</div>
+        <div class="text-[10px] font-mono text-ibm-gray70 dark:text-ibm-gray30 mt-1">${d.wordCount || 0} words · ${d.imageCount || 0} images${d.pageCount ? ' · ' + d.pageCount + ' pages' : ''}</div>
+        <div class="text-xs text-ibm-gray70 dark:text-ibm-gray30 mt-2 line-clamp-2 font-mono">${escapeHtml((d.preview || '').slice(0, 160))}…</div>
+      </button>
+    `).join('');
+  } catch {
+    document.getElementById('docList').innerHTML =
+      `<div class="bg-white dark:bg-ibm-gray100 p-8 text-center text-sm text-ibm-red font-mono col-span-full">
+         ETL API unreachable on :8092
+       </div>`;
+  }
+}
+
+document.getElementById('refreshDocs').addEventListener('click', loadDocs);
+let searchTimer;
+document.getElementById('docSearch').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(loadDocs, 300);
+});
+
+/* ============ Doc detail modal ============ */
+async function viewDoc(docId) {
+  try {
+    const r = await fetch(`${ETL}/api/v1/etl/documents/${docId}`);
+    const d = await r.json();
+    document.getElementById('modalTitle').textContent = d.sourceFile || docId;
+    document.getElementById('modalBody').innerHTML = `
+      <div class="space-y-4">
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs font-mono">
+          <div><div class="text-ibm-gray50">docId</div><div class="break-all">${escapeHtml(d.docId)}</div></div>
+          <div><div class="text-ibm-gray50">media</div><div>${escapeHtml(d.mediaType)}</div></div>
+          <div><div class="text-ibm-gray50">extractor</div><div>${escapeHtml(d.extractor)}</div></div>
+          <div><div class="text-ibm-gray50">words</div><div>${(d.wordCount || 0).toLocaleString()}</div></div>
+          <div><div class="text-ibm-gray50">pages</div><div>${d.pageCount || 0}</div></div>
+          <div><div class="text-ibm-gray50">images</div><div>${(d.images || []).length}</div></div>
+        </div>
+
+        ${d.metadata ? `
+          <div>
+            <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-1">Metadata</div>
+            <pre class="bg-ibm-gray10 dark:bg-ibm-gray90 p-3 text-[11px] font-mono overflow-x-auto max-h-40">${escapeHtml(JSON.stringify(d.metadata, null, 2))}</pre>
+          </div>` : ''}
+
+        ${d.images && d.images.length ? `
+          <div>
+            <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-1">Extracted images (${d.images.length})</div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              ${d.images.map(im => `
+                <div class="border border-ibm-gray20 dark:border-ibm-gray80 p-2 text-xs">
+                  <div class="font-mono text-[10px] text-ibm-gray50 break-all">${escapeHtml(im.key || im.uri || '')}</div>
+                  <div class="text-[10px] mt-1">${im.width || '?'}×${im.height || '?'} · ${humanSize(im.size || 0)}</div>
+                  ${im.ocrText ? `<div class="text-[10px] mt-1 italic line-clamp-2">"${escapeHtml(im.ocrText.slice(0, 100))}"</div>` : ''}
+                </div>`).join('')}
+            </div>
+          </div>` : ''}
+
+        <div>
+          <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-1">Extracted text (first 4 KB)</div>
+          <pre class="bg-ibm-gray10 dark:bg-ibm-gray90 p-3 text-[11px] font-mono overflow-x-auto max-h-64 whitespace-pre-wrap">${escapeHtml((d.text || '').slice(0, 4000))}</pre>
+        </div>
+      </div>`;
+    document.getElementById('modal').classList.remove('hidden');
+    document.getElementById('modal').classList.add('flex');
+  } catch {
+    alert('failed to load document');
+  }
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.add('hidden');
+  document.getElementById('modal').classList.remove('flex');
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+window.viewDoc = viewDoc;
+window.closeModal = closeModal;
+
+/* ============ Boot ============ */
+checkApi();
+loadExamples();
+loadDocs();
+setInterval(checkApi, 15000);
+</script>
+</body>
+</html>

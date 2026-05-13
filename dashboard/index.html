@@ -55,6 +55,20 @@
   .dark ::-webkit-scrollbar-thumb { background:#525252; }
   *:focus-visible { outline: 2px solid #0f62fe; outline-offset: 2px; }
   .status-dot { width:8px; height:8px; display:inline-block; }
+  @keyframes progress-stripes { from { background-position: 0 0; } to { background-position: 40px 0; } }
+  .progress-stripes {
+    background-image: linear-gradient(45deg,
+      rgba(255,255,255,.2) 25%, transparent 25%,
+      transparent 50%, rgba(255,255,255,.2) 50%,
+      rgba(255,255,255,.2) 75%, transparent 75%);
+    background-size: 40px 40px;
+    animation: progress-stripes 1s linear infinite;
+  }
+  .stage-dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+  .stage-pending { background:#c6c6c6; }
+  .stage-active  { background:#0f62fe; animation: pulse-dot 1s ease-in-out infinite; }
+  .stage-done    { background:#24a148; }
+  .stage-error   { background:#da1e28; }
 </style>
 </head>
 <body class="bg-white text-ibm-gray100 dark:bg-ibm-gray100 dark:text-ibm-gray10 transition-colors">
@@ -95,8 +109,12 @@
       The full pipeline,<br/><span class="font-semibold text-ibm-blue">running in containers on your machine.</span>
     </h1>
     <p class="mt-4 text-sm sm:text-base text-ibm-gray70 dark:text-ibm-gray30 max-w-3xl">
-      Five sample connectors (Python + Go) → Kafka → Sink service → Elasticsearch + Redis + TimescaleDB. Apache NiFi is provisioned alongside for visual dataflow design. Click any tile below to open a service.
+      Five sample connectors (Python + Go) → Kafka → Sink service → Elasticsearch + Redis + TimescaleDB. Apache NiFi is provisioned alongside for visual dataflow design. Click any tile below to open a service, or scroll down to upload files through the ETL pipeline.
     </p>
+    <div class="mt-5 flex flex-wrap gap-2 text-xs">
+      <a href="#etl-section" class="px-3 py-1.5 bg-ibm-blue text-white font-medium hover:bg-ibm-blue70 transition">↓ Upload a file (ETL)</a>
+      <a href="#ai-section" class="px-3 py-1.5 border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">↓ Ask the AI assistant</a>
+    </div>
   </div>
 </section>
 
@@ -189,8 +207,95 @@
   </div>
 </section>
 
+<!-- ETL UPLOAD -->
+<section id="etl-section" class="border-b border-ibm-gray20 dark:border-ibm-gray80">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <div class="flex items-center justify-between mb-4 gap-4 flex-wrap">
+      <div>
+        <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue">§ ETL Pipeline</div>
+        <h2 class="text-2xl font-light mt-1">Upload anything — extract, transform, index</h2>
+        <p class="text-sm text-ibm-gray70 dark:text-ibm-gray30 mt-1">Drop a file below. The ETL API extracts text + images, redacts PII, then stores results in MinIO + Elasticsearch. Each stage emits an event to Kafka <code class="font-mono text-ibm-blue">etl.events</code>.</p>
+      </div>
+      <div class="flex items-center gap-2 text-xs font-mono">
+        <span id="etlApiStatus" class="text-ibm-gray70 dark:text-ibm-gray30">checking ETL API…</span>
+        <a href="/etl/" target="_blank" class="px-3 py-1.5 border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">full UI →</a>
+      </div>
+    </div>
+
+    <div class="grid lg:grid-cols-3 gap-px bg-ibm-gray20 dark:bg-ibm-gray80 border border-ibm-gray20 dark:border-ibm-gray80">
+
+      <!-- LEFT: Upload zone (2 cols) -->
+      <div class="lg:col-span-2 bg-white dark:bg-ibm-gray100 p-5">
+
+        <label id="etlDropZone" for="etlFileInput"
+               class="block border-2 border-dashed border-ibm-gray30 dark:border-ibm-gray70 p-8 text-center cursor-pointer hover:border-ibm-blue hover:bg-ibm-blue10 dark:hover:bg-ibm-blue80/10 transition">
+          <svg class="mx-auto w-10 h-10 text-ibm-gray50 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+          </svg>
+          <div class="text-sm font-medium mb-1">Drop a file here, or click to select</div>
+          <div class="text-[11px] text-ibm-gray70 dark:text-ibm-gray30">PDF · images · CSV · JSON · HTML · plain text · logs · code · 50 MB max</div>
+          <input id="etlFileInput" type="file" class="hidden"
+                 accept=".pdf,.png,.jpg,.jpeg,.gif,.bmp,.tiff,.webp,.csv,.json,.html,.htm,.txt,.md,.log,.py,.js,.go,.yaml,.yml" />
+        </label>
+
+        <!-- Selected file -->
+        <div id="etlFileInfo" class="hidden mt-4">
+          <div class="border border-ibm-gray20 dark:border-ibm-gray80 p-3 bg-ibm-gray10/40 dark:bg-ibm-gray90/40">
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+              <div><div class="text-ibm-gray50">filename</div><div id="etlFileName" class="font-medium break-all">—</div></div>
+              <div><div class="text-ibm-gray50">size</div><div id="etlFileSize" class="font-medium">—</div></div>
+              <div><div class="text-ibm-gray50">MIME</div><div id="etlFileMime" class="font-medium break-all">—</div></div>
+              <div><div class="text-ibm-gray50">extractor</div><div id="etlFileExtractor" class="font-medium text-ibm-blue">—</div></div>
+            </div>
+            <div class="flex gap-2 mt-3">
+              <button id="etlUploadBtn" class="px-4 py-1.5 bg-ibm-blue text-white text-xs font-medium hover:bg-ibm-blue70 transition disabled:opacity-50">Run ETL Pipeline →</button>
+              <button id="etlClearBtn" class="px-4 py-1.5 border border-ibm-gray30 dark:border-ibm-gray70 text-xs hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Clear</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stages -->
+        <div id="etlStages" class="hidden mt-4">
+          <div class="font-mono text-[10px] uppercase tracking-wider text-ibm-gray70 dark:text-ibm-gray30 mb-2">Pipeline</div>
+          <ol class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-xs">
+            <li class="flex items-center gap-2"><span id="etl-stage-received"  class="stage-dot stage-pending"></span><span class="font-mono">received</span></li>
+            <li class="flex items-center gap-2"><span id="etl-stage-extract"   class="stage-dot stage-pending"></span><span class="font-mono">extract</span></li>
+            <li class="flex items-center gap-2"><span id="etl-stage-transform" class="stage-dot stage-pending"></span><span class="font-mono">transform</span></li>
+            <li class="flex items-center gap-2"><span id="etl-stage-minio"     class="stage-dot stage-pending"></span><span class="font-mono">load.minio</span></li>
+            <li class="flex items-center gap-2"><span id="etl-stage-es"        class="stage-dot stage-pending"></span><span class="font-mono">load.elasticsearch</span></li>
+            <li class="flex items-center gap-2"><span id="etl-stage-complete"  class="stage-dot stage-pending"></span><span class="font-mono">complete</span></li>
+          </ol>
+          <div id="etlProgressBar" class="hidden mt-3 h-1 bg-ibm-gray20 dark:bg-ibm-gray80 overflow-hidden">
+            <div class="h-full progress-stripes bg-ibm-blue"></div>
+          </div>
+        </div>
+
+        <!-- Result -->
+        <div id="etlResult" class="hidden mt-4 border border-ibm-green/30 bg-ibm-green/5 p-3 text-xs"></div>
+
+        <!-- Error -->
+        <div id="etlError" class="hidden mt-4 border border-ibm-red/30 bg-ibm-red/5 p-3">
+          <div class="font-mono text-[10px] uppercase tracking-wider text-ibm-red mb-1">Error</div>
+          <div id="etlErrorBody" class="font-mono text-xs"></div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Recent documents -->
+      <aside class="bg-white dark:bg-ibm-gray100 p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue">Recent documents</div>
+          <button id="etlRefreshDocs" class="text-[10px] font-mono text-ibm-gray70 dark:text-ibm-gray30 hover:text-ibm-blue">↻ refresh</button>
+        </div>
+        <div id="etlDocList" class="space-y-2 max-h-[420px] overflow-y-auto">
+          <div class="text-xs text-ibm-gray50 font-mono">loading…</div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
 <!-- AI ASSISTANT -->
-<section class="border-b border-ibm-gray20 dark:border-ibm-gray80 bg-ibm-gray10/40 dark:bg-ibm-gray100">
+<section id="ai-section" class="border-b border-ibm-gray20 dark:border-ibm-gray80 bg-ibm-gray10/40 dark:bg-ibm-gray100">
   <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
     <div class="font-mono text-xs uppercase tracking-widest text-ibm-blue mb-2">§ AI Assistant (FastAPI)</div>
     <h2 class="text-2xl font-light mb-1">Ask anything about your live data</h2>
@@ -303,6 +408,8 @@ const CORE_TILES = [
 const APP_TILES = [
   { name:'Query API',     desc:'Go service · GET /api/v1/stats, /search, /recent, /throughput, /sources', port:8090, badge:'GO · REST', color:'#0f62fe', path:'/api/v1/stats' },
   { name:'AI Assistant',  desc:'Python FastAPI · POST /api/v1/ask · OpenAPI docs at /docs', port:8091, badge:'PYTHON · FASTAPI', color:'#8a3ffc', path:'/docs' },
+  { name:'ETL API',       desc:'Python FastAPI · POST /api/v1/etl/upload · extract text+images from any file, store in MinIO + ES', port:8092, badge:'PYTHON · ETL', color:'#ee5396', path:'/docs' },
+  { name:'ETL Upload Form', desc:'Drag-drop UI for the ETL pipeline — PDFs, images, CSV, JSON, HTML. Lives at /etl on this dashboard.', port:8080, badge:'HTML · UPLOAD', color:'#ff832b', path:'/etl/' },
   { name:'This Dashboard', desc:'Nginx-served static HTML. The page you are reading.', port:8080, badge:'HTML · TAILWIND', color:'#24a148' },
 ];
 
@@ -508,15 +615,188 @@ document.getElementById('chatForm').addEventListener('submit', e => {
   const v = inp.value; inp.value = ''; askAI(v);
 });
 
+/* ============================================================
+ * ETL — file upload + recent docs (talks to ETL API on :8092)
+ * ============================================================ */
+const ETL = `http://${HOST}:8092`;
+
+function etlHumanSize(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+  if (b < 1024*1024*1024) return (b/1024/1024).toFixed(2) + ' MB';
+  return (b/1024/1024/1024).toFixed(2) + ' GB';
+}
+
+function etlPickExtractor(name, mime) {
+  const n = name.toLowerCase();
+  if (mime === 'application/pdf' || n.endsWith('.pdf')) return 'pdf';
+  if ((mime || '').startsWith('image/') || /\.(png|jpe?g|gif|bmp|tiff|webp)$/.test(n)) return 'image (OCR)';
+  if (mime === 'text/csv' || n.endsWith('.csv')) return 'csv';
+  if (mime === 'application/json' || n.endsWith('.json')) return 'json';
+  if (mime === 'text/html' || /\.html?$/.test(n)) return 'html';
+  return 'text';
+}
+
+function etlEscape(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function etlSetStage(id, state) {
+  const el = document.getElementById('etl-stage-' + id);
+  if (el) el.className = 'stage-dot stage-' + state;
+}
+
+async function etlCheckApi() {
+  const el = document.getElementById('etlApiStatus');
+  try {
+    const r = await fetch(`${ETL}/healthz`);
+    if (!r.ok) throw new Error('unhealthy');
+    const data = await r.json();
+    const ok = data.components && data.components.pdf && data.components.ocr;
+    el.innerHTML = `<span class="live-dot w-2 h-2 rounded-full bg-ibm-green inline-block mr-1"></span>ETL API ready${ok ? '' : ' (limited)'}`;
+  } catch {
+    el.innerHTML = `<span class="w-2 h-2 rounded-full bg-ibm-red inline-block mr-1"></span><span class="text-ibm-red">ETL API offline</span>`;
+  }
+}
+
+let etlCurrentFile = null;
+const etlDropZone = document.getElementById('etlDropZone');
+const etlFileInput = document.getElementById('etlFileInput');
+
+['dragenter','dragover'].forEach(ev =>
+  etlDropZone.addEventListener(ev, e => { e.preventDefault(); etlDropZone.classList.add('border-ibm-blue','bg-ibm-blue10'); })
+);
+['dragleave','drop'].forEach(ev =>
+  etlDropZone.addEventListener(ev, e => { e.preventDefault(); etlDropZone.classList.remove('border-ibm-blue','bg-ibm-blue10'); })
+);
+etlDropZone.addEventListener('drop', e => {
+  if (e.dataTransfer.files.length) etlSelectFile(e.dataTransfer.files[0]);
+});
+etlFileInput.addEventListener('change', e => {
+  if (e.target.files.length) etlSelectFile(e.target.files[0]);
+});
+
+function etlSelectFile(f) {
+  etlCurrentFile = f;
+  document.getElementById('etlFileName').textContent = f.name;
+  document.getElementById('etlFileSize').textContent = etlHumanSize(f.size);
+  document.getElementById('etlFileMime').textContent = f.type || '—';
+  document.getElementById('etlFileExtractor').textContent = etlPickExtractor(f.name, f.type);
+  document.getElementById('etlFileInfo').classList.remove('hidden');
+  document.getElementById('etlStages').classList.add('hidden');
+  document.getElementById('etlResult').classList.add('hidden');
+  document.getElementById('etlError').classList.add('hidden');
+}
+
+document.getElementById('etlClearBtn').addEventListener('click', () => {
+  etlCurrentFile = null;
+  etlFileInput.value = '';
+  document.getElementById('etlFileInfo').classList.add('hidden');
+  document.getElementById('etlStages').classList.add('hidden');
+  document.getElementById('etlResult').classList.add('hidden');
+  document.getElementById('etlError').classList.add('hidden');
+});
+
+document.getElementById('etlUploadBtn').addEventListener('click', async () => {
+  if (!etlCurrentFile) return;
+
+  ['received','extract','transform','minio','es','complete'].forEach(s => etlSetStage(s, 'pending'));
+  document.getElementById('etlStages').classList.remove('hidden');
+  document.getElementById('etlResult').classList.add('hidden');
+  document.getElementById('etlError').classList.add('hidden');
+  document.getElementById('etlProgressBar').classList.remove('hidden');
+  document.getElementById('etlUploadBtn').disabled = true;
+
+  // Animate plausible stage progress while the request is in flight
+  (async () => {
+    for (const s of ['received','extract','transform','minio','es']) {
+      etlSetStage(s, 'active');
+      await new Promise(r => setTimeout(r, 250));
+    }
+  })();
+
+  try {
+    const fd = new FormData();
+    fd.append('file', etlCurrentFile);
+    const r = await fetch(`${ETL}/api/v1/etl/upload`, { method: 'POST', body: fd });
+    if (!r.ok) {
+      const detail = await r.text();
+      throw new Error(`${r.status} ${r.statusText} — ${detail}`);
+    }
+    const result = await r.json();
+    ['received','extract','transform','minio','es','complete'].forEach(s => etlSetStage(s, 'done'));
+    document.getElementById('etlProgressBar').classList.add('hidden');
+
+    document.getElementById('etlResult').innerHTML = `
+      <div class="font-medium text-ibm-green flex items-center gap-2 mb-2">
+        ✓ Processed in ${result.durationMs}ms — <span class="font-mono text-[10px] break-all">${etlEscape(result.docId)}</span>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono">
+        <div><div class="text-ibm-gray50 text-[10px]">extractor</div><div>${etlEscape(result.extractor)}</div></div>
+        <div><div class="text-ibm-gray50 text-[10px]">words</div><div>${result.wordCount.toLocaleString()}</div></div>
+        <div><div class="text-ibm-gray50 text-[10px]">pages</div><div>${result.pageCount}</div></div>
+        <div><div class="text-ibm-gray50 text-[10px]">images</div><div>${result.imageCount}</div></div>
+      </div>
+      <div class="flex flex-wrap gap-2 mt-3">
+        <a href="/etl/" target="_blank" class="px-2 py-1 text-[11px] font-mono bg-ibm-blue text-white hover:bg-ibm-blue70 transition">view in full UI →</a>
+        <a href="http://${HOST}:9001" target="_blank" class="px-2 py-1 text-[11px] font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">MinIO →</a>
+        <a href="http://${HOST}:5601" target="_blank" class="px-2 py-1 text-[11px] font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Kibana →</a>
+      </div>`;
+    document.getElementById('etlResult').classList.remove('hidden');
+    etlLoadDocs();
+  } catch (e) {
+    ['received','extract','transform','minio','es','complete'].forEach(s => {
+      const el = document.getElementById('etl-stage-' + s);
+      if (el && el.className.includes('stage-active')) etlSetStage(s, 'error');
+    });
+    document.getElementById('etlProgressBar').classList.add('hidden');
+    document.getElementById('etlErrorBody').textContent = String(e.message || e);
+    document.getElementById('etlError').classList.remove('hidden');
+  } finally {
+    document.getElementById('etlUploadBtn').disabled = false;
+  }
+});
+
+async function etlLoadDocs() {
+  try {
+    const r = await fetch(`${ETL}/api/v1/etl/documents?size=10`);
+    if (!r.ok) throw new Error(r.statusText);
+    const { hits } = await r.json();
+    if (!hits || !hits.length) {
+      document.getElementById('etlDocList').innerHTML =
+        `<div class="text-xs text-ibm-gray50 font-mono py-3">No documents yet. Upload one to see it here.</div>`;
+      return;
+    }
+    document.getElementById('etlDocList').innerHTML = hits.map(d => `
+      <a href="/etl/" target="_blank" class="block border border-ibm-gray20 dark:border-ibm-gray80 p-2 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">
+        <div class="flex items-center justify-between mb-1">
+          <span class="chip bg-ibm-blue text-white">${etlEscape((d.extractor || '').split(' ')[0].toUpperCase())}</span>
+          <span class="text-[10px] font-mono text-ibm-gray50">${(d.extractedAt || '').slice(11,19)}</span>
+        </div>
+        <div class="text-xs font-medium truncate">${etlEscape(d.sourceFile || d.docId)}</div>
+        <div class="text-[10px] font-mono text-ibm-gray70 dark:text-ibm-gray30 mt-0.5">${d.wordCount || 0}w · ${d.imageCount || 0}img${d.pageCount ? ' · ' + d.pageCount + 'p' : ''}</div>
+      </a>`).join('');
+  } catch {
+    document.getElementById('etlDocList').innerHTML =
+      `<div class="text-xs text-ibm-red font-mono py-3">ETL API offline. Try: curl http://${HOST}:8092/healthz</div>`;
+  }
+}
+
+document.getElementById('etlRefreshDocs').addEventListener('click', etlLoadDocs);
+
 /* ============ Boot + loops ============ */
 renderChat();
 loadPrompts();
 refreshStatuses();
 refreshStats();
 refreshEvents();
+etlCheckApi();
+etlLoadDocs();
 setInterval(refreshStatuses, 15000);
 setInterval(refreshStats, 3000);
 setInterval(refreshEvents, 4000);
+setInterval(etlCheckApi, 15000);
+setInterval(etlLoadDocs, 10000);
 </script>
 </body>
 </html>

@@ -1,494 +1,591 @@
-# NimbusPulse
+# NimbusPulse — Docker Compose POC
 
-**A unified data-ingestion & observability platform simulation — Datadog-style, Simple design language.**
+A working proof-of-concept of the NimbusPulse production architecture, all running locally in Docker. **Five sample connectors** (Python + Go) push synthetic data into **Kafka**; a **Go sink service** fans events out to **Elasticsearch**, **Redis**, and **TimescaleDB**; a **Go Query API** and a **Python FastAPI AI assistant** expose the data; a **single HTML+Tailwind dashboard** gives you one-click access to every UI in the stack.
 
-NimbusPulse is a single-page interactive simulation of a production-grade observability platform. It demonstrates how a real system would ingest data from AWS, Azure, GCP, Kubernetes, system logs, security tools, databases, and custom sources — then normalize, route, store, and surface that data through a live dashboard and an AI assistant.
-
-Every button, modal, chart, connector, custom-schema form, and AI prompt is fully interactive. No backend, no build step, no network calls — just open `index.html`.
+Apache **NiFi** ships alongside as the visual dataflow tool you'd use to build the production flow.
 
 ---
 
-## Table of Contents
+## Table of contents
 
-1. [What this is (and isn't)](#what-this-is-and-isnt)
-2. [Quick start](#quick-start)
-3. [File structure](#file-structure)
-4. [Walkthrough — every section, in order](#walkthrough--every-section-in-order)
-5. [Connector schema format](#connector-schema-format)
-6. [Adding a custom connector](#adding-a-custom-connector)
-7. [The AI assistant](#the-ai-assistant)
-8. [Production architecture (the target build)](#production-architecture-the-target-build)
-9. [Tech stack & design decisions](#tech-stack--design-decisions)
-10. [localStorage keys](#localstorage-keys)
-11. [Customization & extending](#customization--extending)
-
----
-
-## What this is (and isn't)
-
-**What it is:**
-
-- A working **front-end simulation** of a unified observability platform.
-- A demonstration of **how the UX should feel** when ingesting and exploring data from 22 different source types simultaneously.
-- A reference for the **production architecture** that would sit behind this UI — centered on Apache NiFi, Kafka, Flink, and polyglot storage.
-- A self-contained file you can open offline.
-
-**What it isn't:**
-
-- A real ingestion system. There is no backend; events are synthesized in the browser.
-- A general-purpose dashboard framework. The simulation is purpose-built for this demo.
-- Production code. The code prioritizes clarity over hardening (no auth, no rate limits, no error retry).
+1. [Quick start](#quick-start)
+2. [What's in the box](#whats-in-the-box)
+3. [Architecture & data flow](#architecture--data-flow)
+4. [Port map & credentials](#port-map--credentials)
+5. [Service-by-service tour](#service-by-service-tour)
+6. [First-time setup notes](#first-time-setup-notes)
+7. [API reference](#api-reference)
+8. [Troubleshooting](#troubleshooting)
+9. [Extending the POC](#extending-the-poc)
+10. [File layout](#file-layout)
 
 ---
 
 ## Quick start
 
+**Prerequisites:**
+
+- Docker Engine **24+** with Compose v2 (`docker compose`, not `docker-compose`)
+- ~**6 GB free RAM** (Elasticsearch alone takes 1 GB; Kafka + NiFi + the rest pushes it up)
+- ~**5 GB free disk** for images
+- Ports listed in the [port map](#port-map--credentials) free on `localhost`
+
+**Start everything:**
+
 ```bash
-# 1. Unzip / clone wherever you keep things
-# 2. Open the file
-open index.html        # macOS
-xdg-open index.html    # Linux
-start index.html       # Windows
+cd nimbuspulse-poc
+docker compose up -d
+# (or, equivalently)
+make up
 ```
 
-That's it. No `npm install`, no build step, no server. The page pulls Tailwind from the CDN and Simple Plex fonts from Google Fonts on first load.
+**Wait ~60 seconds** for Elasticsearch + NiFi to finish booting (Kafka comes up first, then the storage tier, then the sink + connectors). You can watch progress with:
 
-**Offline use:** if you need to run without internet, you can swap the Tailwind CDN script for a built Tailwind file and download the fonts locally — but for evaluation, online is fine.
+```bash
+docker compose ps         # see which services are healthy
+docker compose logs -f    # tail all logs
+make logs-sink            # tail just the sink to see events flow in
+```
+
+**Open the main dashboard:**
+
+→ <http://localhost:8080>
+
+The dashboard auto-updates every few seconds with live stats from the Query API, shows the most recent events, and has tiles linking to every other UI in the stack.
+
+**Stop everything:**
+
+```bash
+docker compose down       # stop, keep data
+docker compose down -v    # stop + wipe data volumes
+```
 
 ---
 
-## File structure
+## What's in the box
 
-```
-nimbuspulse/
-├── index.html        # the entire app — HTML, CSS, JS, SVG, data
-└── README.md         # this file
-```
+**18 services** organized into five layers:
 
-Everything is in one HTML file by design — easy to share, easy to read end-to-end. The file is organized top-to-bottom as:
-
-1. `<head>` — meta, Tailwind config, Simple Plex fonts, custom CSS
-2. `<header>` — sticky nav with logo, anchors, live status, theme toggle
-3. `<main>` — eight numbered sections (§01 through §08)
-4. `<footer>` — version & build info
-5. Modal + toast components
-6. `<script>` — all simulation logic at the bottom
-
----
-
-## Walkthrough — every section, in order
-
-The page is built as a top-to-bottom narrative. You can scroll through it as a presentation, or jump to any section via the header.
-
-### § 01 — System Overview
-
-A five-stage SVG flow diagram: **Sources → Ingest → Normalize → Store → Consume**. This is the conceptual model. Each stage is a column with the relevant tech/sources.
-
-Below the diagram, three buttons open explainer modals:
-
-- "Explain this diagram" — what each stage does
-- "What's in an event schema?" — the common envelope format every connector normalizes to
-- "Why normalize & enrich?" — rationale for the middle stage
-
-### § 02 — Live Dashboard
-
-Real-time KPI tiles + charts driven by an in-browser event simulator that fires every 2 seconds.
-
-**Four KPI tiles (clickable for an explainer):**
-
-- **Events / sec** — rolling 20-second average across all enabled connectors
-- **Error rate** — % of events at severity ERROR/CRITICAL, compared to a 1% SLO
-- **Active sources** — count of currently-enabled connectors (out of 22+)
-- **Ingest volume / hour** — estimated bytes-per-hour after gzip compression
-
-**Two charts:**
-
-- **Throughput sparkline** — events per tick over the last 60 ticks (~2 minutes)
-- **Severity bars** — stacked counts of DEBUG / INFO / WARN / ERROR / CRITICAL
-
-**Controls:**
-
-- `⏸ PAUSE` / `▶ RESUME` — stops/restarts the event generator
-- `↻ RESET` — clears all state and starts fresh
-
-### § 03 — Source Connectors
-
-The 22 built-in connectors, displayed as a grid. Each card shows the connector's icon, name, category, protocol, schedule, and status.
-
-**Per-card actions:**
-
-- `pause` / `start` — toggles ingestion for that connector (persisted to localStorage)
-- `inspect` — opens a modal showing the connector spec, schema, status, and a description of what its NiFi process group looks like in production
-
-**Built-in connector categories:**
-
-- **Cloud** — AWS CloudWatch, AWS CloudTrail, AWS S3 Access, Azure Monitor, Azure App Insights, GCP Logging
-- **Platform** — Kubernetes Events, Kubernetes Pod Logs, Docker Container
-- **System** — Syslog (RFC 5424), Application Health
-- **Security** — Security/SIEM, Auth/SSO Logs, WAF/Firewall
-- **Web** — Nginx, Apache, CDN/Edge
-- **Database** — PostgreSQL, MySQL Slow Query
-- **Custom** — Generic Webhook, Kafka Topic, WebSocket Feed
-
-**Below the grid:** a form to add your own connectors (see [Adding a custom connector](#adding-a-custom-connector)).
-
-### § 04 — Live Event Stream
-
-A scrolling, filterable feed of every event the simulator produces. New events animate in at the top.
-
-**Filters:**
-
-- By severity (DEBUG / INFO / WARN / ERROR / CRITICAL)
-- By source (all 22+ connectors plus any custom ones)
-
-**Per-row interaction:** click any event to open a detail modal with:
-
-- Full structured payload (JSON)
-- Original raw log line
-- Action buttons: `Acknowledge`, `Investigate`, `Mute source`, `Replay`
-- **`✦ Explain with AI`** — generates a static-but-contextual AI explanation of what likely happened, why it matters, and what to do
-
-### § 05 — Logs Explorer
-
-Same event stream, but in an expandable-row format optimized for forensic search. Type a query in the search box to filter by message text or source name. Click a row to expand it inline and see the structured fields, then jump to the full detail modal or AI explanation.
-
-### § 06 — Ingestion Protocols
-
-A 5-column grid covering the protocols the platform supports. Each card has a one-line description and a mini SVG flow diagram:
-
-- **REST** — POST /v1/ingest, best for periodic exports
-- **gRPC** — bidirectional binary stream, best for high-volume agents
-- **GraphQL** — selective field subscriptions, best for UIs
-- **WebSocket** — persistent duplex, best for browsers and IoT
-- **Kafka** — durable log-based queue, best for backpressure and replay
-
-### § 07 — Production Architecture (the target build)
-
-**This is the diagram of what we would actually build behind this UI.** The simulation above is the front-end; section 07 is the back-end blueprint.
-
-The SVG diagram covers, left to right:
-
-1. **Sources** — AWS, Azure, GCP, Kubernetes, Syslog, Security tools, IoT, DB CDC (Debezium), Custom apps
-2. **Ingest gateways** — REST (Nginx + OpenAPI), gRPC (Envoy + protobuf), GraphQL (Apollo), WebSocket (sticky sessions), Kafka Connect, Pull Scheduler
-3. **Apache NiFi** — the central dataflow orchestrator (more below)
-4. **Stream bus & processing** — Apache Kafka, Schema Registry (Confluent), Apache Flink (windowed aggregations), Anomaly Detector (ML), Alert Engine
-5. **Storage tier** — Elasticsearch (hot search), ClickHouse (OLAP), S3 + Iceberg (cold), Redis (cache), TimescaleDB (metrics)
-6. **Query / API / AI** — Query API, Auth (Keycloak + OIDC + OPA), RAG + Vector Store (pgvector), LLM Assistant
-7. **Consumers** — Web Dashboard, Alerts & Paging, Mobile/CLI, Downstream Apps, Compliance Export
-8. **Cross-cutting** — Observability (OTel), Secrets (Vault), Infra (Terraform/K8s), CI/CD (ArgoCD/GitOps), Cost (FinOps tags)
-
-**Apache NiFi's role specifically (the highlighted block in the diagram):**
-
-```
-ListenHTTP / ListenTCP        ← receive from gateways
-   ↓
-EvaluateJsonPath · Schema     ← parse + validate against the registry
-   ↓
-UpdateAttribute · Enrich      ← add geo, user, trace id
-   ↓
-ReplaceText · PII mask        ← regex redaction + tokenization
-   ↓
-RouteOnAttribute              ← split by severity / domain
-   ↓
-PublishKafkaRecord_2_6        ← publish to topic.events.{severity}
-```
-
-Every connector you define in JSON/YAML (in §03) compiles into a NiFi **process group** with exactly these steps. That's the design contract between the simulation and the real system.
-
-**Three explainer cards below the diagram:**
-
-- Why Apache NiFi at the center?
-- Why Kafka + Flink?
-- Why polyglot storage?
-
-### § 08 — AI Assistant
-
-A simulated AI chat interface modeled on how the real assistant would work (LLM + RAG over indexed events). See [The AI assistant](#the-ai-assistant) below for full details.
-
----
-
-## Connector schema format
-
-Every connector — built-in or custom — is described by a small declarative spec. Five fields are required:
-
-| Field | Type | Description |
-|---|---|---|
-| `id` | string | Unique slug, used in event records (`source: my-connector`). |
-| `name` | string | Human-readable display name. |
-| `category` | string | Free-form grouping (Cloud, Platform, System, Security, Web, Database, Custom). |
-| `protocol` | string | Wire protocol (`rest`, `grpc`, `kafka`, `websocket`, `pull`, `tail`, `udp/tcp`, `unix-socket`). |
-| `schema` | object | Field-name → type map describing the event payload shape. |
-
-Optional fields:
-
-| Field | Default | Description |
-|---|---|---|
-| `icon` | `✦` | One-character icon shown on the card. |
-| `color` | `#8a3ffc` | Hex color used for the icon background and the event-stream dot. |
-| `schedule` | `realtime` | Cron expression for pull-style connectors, or `realtime` for push. |
-| `enabled` | `true` | Whether ingestion starts on save. |
-
-### JSON example
-
-```json
-{
-  "id": "stripe-webhook",
-  "name": "Stripe Payment Webhook",
-  "category": "Custom",
-  "protocol": "rest",
-  "icon": "$",
-  "color": "#635bff",
-  "schedule": "realtime",
-  "schema": {
-    "id": "string",
-    "type": "string",
-    "created": "unix_ts",
-    "data": "object"
-  }
-}
-```
-
-### YAML example (equivalent)
-
-```yaml
-id: stripe-webhook
-name: Stripe Payment Webhook
-category: Custom
-protocol: rest
-icon: $
-color: '#635bff'
-schedule: realtime
-schema:
-  id: string
-  type: string
-  created: unix_ts
-  data: object
-```
-
-The YAML parser supports flat keys plus one level of nesting (the `schema:` block) — enough for connector specs. JSON allows arbitrary nesting.
-
-### Supported schema field types
-
-The schema field types are descriptive labels (NiFi enforces them in production):
-
-- Primitives: `string`, `int`, `float`, `bool`
-- Time: `iso8601`, `unix_ts`
-- Special: `ip`, `enum`, `object`, `array`
-
----
-
-## Adding a custom connector
-
-In §03, scroll to **"Add a custom connector"**.
-
-1. Click **Load JSON sample** or **Load YAML sample** to prefill the textarea (or paste your own spec).
-2. Click **Validate**. The right panel reports:
-   - Parse success and detected format (JSON vs YAML)
-   - Whether each required field is present
-   - Number of schema fields detected
-3. Click **Save connector**. The spec is written to `localStorage` under `np_custom_connectors`.
-4. The new connector appears in the grid above with a purple `CUSTOM` chip.
-5. The connector starts producing events immediately (a generic INFO event template is used unless you've added a template — see [Customization](#customization--extending)).
-
-To remove all custom connectors: click **Clear all custom connectors** under the form (confirmation prompt).
-
----
-
-## The AI assistant
-
-§08 simulates a RAG-grounded LLM assistant. In production this would:
-
-1. Embed your question into a vector.
-2. Retrieve the most relevant recent events from Elasticsearch + pgvector.
-3. Pull metric snapshots from TimescaleDB for the time window.
-4. Send question + retrieved context to an LLM with strict guardrails.
-5. Stream a grounded answer with citations back to the UI.
-
-Here it's a static, pattern-matched simulation — but it's contextualized: it reads the current `STATE.events`, `STATE.sevCounts`, and connector status to make replies feel live.
-
-### Suggested prompts (in the left sidebar)
-
-- Summarize the last 5 minutes of events
-- Why is the error rate climbing?
-- Show me failed logins
-- Which sources are silent?
-- What does OOMKilled mean?
-- Are there any security threats?
-- Top 3 noisy sources today
-- Explain this slow Postgres query
-
-Click any to fire it. They also work as a tutorial for what the assistant can answer.
-
-### Pattern reference
-
-The reply generator matches on keywords. Here's the full catalog:
-
-| If your message mentions… | The assistant returns… |
-|---|---|
-| `summary`, `last X minutes`, `recent` | A digest of total events, sev breakdown, error rate, top sources |
-| `error climb`, `error spike`, `why error`, `fail` (without auth context) | Error analysis pointing at k8s OOMKilled, Nginx 502s, app health flap |
-| `login`, `password`, `credential`, `auth fail`, `brute force`, `stuff` | Credential-stuffing analysis with remediation steps |
-| `security`, `threat`, `attack`, `breach`, `malware`, `sqli`, `xss` | WAF/SIEM/CloudTrail rollup with severity assessment |
-| `slow`, `latency`, `p95`, `p99`, `performance`, `degrad` | App Insights + Postgres + CDN correlation, points to DB indexing |
-| `k8s`, `kubernetes`, `pod`, `oom`, `crash`, `container` | OOMKilled, ImagePullBackOff, rollout status |
-| `silent`, `missing`, `stop`, `inactive`, `down` | List of paused connectors |
-| `aws`, `cloudwatch`, `cloudtrail`, `s3` | AWS-specific signals with root-account warning |
-| `noisy`, `top`, `loud`, `chatty` | Top sources by volume from current event window |
-| `oom`, `memory kill` (standalone) | Deep explanation of OOMKilled + exit code 137 + fixes |
-| `postgres`, `slow query`, `sql` | EXPLAIN ANALYZE workflow + missing-index hypothesis |
-| `nifi`, `apache nifi`, `dataflow`, `pipeline` | NiFi's role + process-group concept |
-| `explain`, `what mean`, `what is`, `how work` | App orientation overview |
-| (anything else) | A list of supported topic areas + prompt suggestions |
-
-Chat history persists to `localStorage` under `np_chat`. Click **Clear chat history** in the sidebar to reset.
-
-### Inline AI explanations from events
-
-You can also invoke the assistant from any event detail modal — click **`✦ Explain with AI`**. The system generates a context-aware static explanation for that specific event (OOMKilled, credential stuffing, root account, slow Postgres, SQLi block, CRITICAL/ERROR/INFO generic). The modal includes an **Open in AI chat →** button to continue the conversation.
-
----
-
-## Production architecture (the target build)
-
-This is what we'd actually build to make this simulation real. The §07 diagram captures it; here's the narrative:
-
-### 1. Ingest gateways (the perimeter)
-
-Six gateways, each tuned to a protocol family:
-
-- **REST gateway** (Nginx + OpenAPI) — batch POST endpoint, OpenAPI-described
-- **gRPC service** (Envoy + protobuf) — bidirectional streaming for high-volume agents
-- **GraphQL gateway** (Apollo) — for UIs that need a tailored live subscription
-- **WebSocket hub** (socket.io + sticky sessions) — browsers and IoT devices
-- **Kafka Connect** — source connectors for systems that publish to Kafka natively
-- **Pull scheduler** — cron-driven for cloud APIs (CloudWatch, Azure Monitor, etc.) that don't push
-
-### 2. Apache NiFi (the heart)
-
-Each connector spec in JSON/YAML compiles to a NiFi **process group** with these processors in order:
-
-| Stage | NiFi Processor | Purpose |
-|---|---|---|
-| Listen | `ListenHTTP` / `ListenTCP` / `ConsumeKafka` | Receive from upstream gateway |
-| Parse | `EvaluateJsonPath` + Schema | Validate against schema registry |
-| Enrich | `UpdateAttribute` | Add geo, user, trace_id, service metadata |
-| Mask | `ReplaceText` | Regex PII redaction + tokenization |
-| Route | `RouteOnAttribute` | Split by severity / domain |
-| Publish | `PublishKafkaRecord_2_6` | Write to `topic.events.{severity}` |
-
-NiFi gives us **back-pressure** (no dropped data when downstream is slow), **provenance** (lineage for every event), **300+ built-in processors**, and **hot-reloadable flows** (new connectors deploy without restart).
-
-### 3. Stream bus + processing
-
-- **Apache Kafka** — durable log-based bus. Every downstream system is a consumer.
-- **Schema Registry** (Confluent) — Avro/Proto schemas enforced at write
-- **Apache Flink** — windowed aggregations write to a metrics topic
-- **Anomaly Detector** — ML scoring (z-score, isolation forest) on metric streams
-- **Alert Engine** — rule evaluator routing to PagerDuty / Slack / email
-
-### 4. Polyglot storage
-
-No single store is good at everything:
-
-| Tier | Store | Retention | Best for |
+| Layer | Service | Image | Purpose |
 |---|---|---|---|
-| Hot | Redis | 15m | Counters, hot cache |
-| Hot | Elasticsearch | 7d | Full-text search |
-| Warm | ClickHouse | 90d | Analytics, billions of rows |
-| Warm | TimescaleDB | 1y | Metrics / time-series |
-| Cold | S3 + Iceberg | 7y | Compliance, replay, parquet |
+| **Entry** | dashboard | nginx:1.27-alpine + custom | Main demo dashboard (HTML/Tailwind/JS) |
+| **Dataflow** | nifi | apache/nifi:latest | Visual dataflow orchestrator |
+| **Bus** | kafka | apache/kafka:latest | KRaft-mode broker (no ZooKeeper) |
+| **Bus** | kafka-ui | provectuslabs/kafka-ui:latest | Web UI for topics & messages |
+| **Bus** | kafka-init | apache/kafka:latest | One-shot topic creator |
+| **Storage** | elasticsearch | elasticsearch:8.15.3 | Primary event index, full-text search |
+| **Storage** | kibana | kibana:8.15.3 | Elasticsearch UI |
+| **Storage** | clickhouse | clickhouse/clickhouse-server:latest | OLAP analytics |
+| **Storage** | redis | redis:7-alpine | Hot cache + counters + recent list |
+| **Storage** | redis-commander | rediscommander/redis-commander | Redis UI |
+| **Storage** | timescaledb | timescale/timescaledb:latest-pg16 | Time-series metrics (Postgres) |
+| **Storage** | adminer | adminer:latest | SQL UI for Timescale |
+| **Storage** | minio | minio/minio:latest | S3-compatible cold storage |
+| **Storage** | minio-init | minio/mc:latest | One-shot bucket creator |
+| **Observability** | grafana | grafana/grafana:latest | Pre-wired dashboards |
+| **Custom** | sink | go 1.23 (built locally) | Consumes Kafka → ES + Redis + Timescale |
+| **Custom** | query-api | go 1.23 (built locally) | REST API on top of ES + Redis |
+| **Custom** | ai-assistant | python 3.12 (built locally) | FastAPI with simulated AI |
+| **Custom** | etl-api | python 3.12 (built locally) | FastAPI ETL service: upload → extract → transform → load |
+| **Connectors** | connector-cloudwatch | python 3.12 + kafka-python | Synthetic AWS CloudWatch events |
+| **Connectors** | connector-k8s-events | go 1.23 + kafka-go | Synthetic Kubernetes events |
+| **Connectors** | connector-syslog | python 3.12 + kafka-python | Synthetic syslog RFC 5424 |
+| **Connectors** | connector-security | go 1.23 + kafka-go | Synthetic SIEM / WAF / auth events |
+| **Connectors** | connector-nginx | python 3.12 + kafka-python | Synthetic Nginx access logs |
 
-A unified Query API hides the polyglot layer from callers.
+**Languages used:**
 
-### 5. Query, AI, and consumers
-
-- **Query API** — REST + GraphQL + a small DSL, routes to the right tier by time range
-- **Auth** — Keycloak (OIDC) + OPA (policy)
-- **RAG / Vector Store** — pgvector holds embeddings of event signatures; the LLM uses retrieval over Elasticsearch + pgvector
-- **LLM Assistant** — explains events, summarizes, answers natural-language queries, with full citations
-- **Consumers** — Web dashboard (this UI), Alerts/Paging, Mobile/CLI, downstream apps (Snowflake, BI), Compliance export (SOC2 / HIPAA / GDPR)
-
-### 6. Cross-cutting
-
-- **Observability** — OpenTelemetry across all services (the platform observes itself)
-- **Secrets** — HashiCorp Vault, no plaintext credentials anywhere
-- **Infra** — Terraform + Kubernetes, GitOps-deployed via ArgoCD
-- **Cost** — FinOps tags on every resource, ingest GB and storage GB-hour billed back
-
----
-
-## Tech stack & design decisions
-
-### Front-end (this simulation)
-
-| Choice | Why |
-|---|---|
-| Single HTML file | Easy to distribute, audit, and read end-to-end |
-| Tailwind CSS via CDN | No build step; utility classes keep markup self-documenting |
-| Vanilla JS | No framework dependency; all logic visible in one place |
-| Inline SVG | Crisp at every zoom, themable via CSS, no external assets |
-| Simple Plex Sans + Plex Mono | Simple design language — clean, technical, distinctive |
-| Simple Carbon color tokens | Blue `#0f62fe`, gray scale `gray10`-`gray100`, status colors |
-| Sharp 90° corners | Simple design language — no rounded corners anywhere |
-| Grid background | Subtle technical texture in the hero |
-| Dark mode | Class-toggled on `<html>`, persisted to localStorage |
-
-### Why Simple design language specifically?
-
-The brief asked for Simple blue + white + Plex fonts. Simple's Carbon design system happens to fit well with a serious technical product: dense layouts, mono-spaced data, sharp edges, and a single accent blue. The color palette is deliberately limited to keep severity colors meaningful when they appear.
+- **Python** (`kafka-python`, `FastAPI`, `httpx`) where iteration speed matters: 3 connectors + AI assistant
+- **Go** (`segmentio/kafka-go`, `pgx/v5`, `redis/go-redis`) where throughput matters: 2 connectors + sink + query API
+- **HTML/Tailwind/vanilla JS** for the dashboard
 
 ---
 
-## localStorage keys
+## Architecture & data flow
 
-The app persists four things in `localStorage`:
+```
+┌────────────────┐    ┌───────────────────────────────────────────┐    ┌───────────────────┐
+│   5 sample     │    │   Apache Kafka (KRaft, no ZooKeeper)      │    │  Storage tier     │
+│   connectors   │    │                                           │    │                   │
+│                │    │  raw.cloudwatch                           │    │  Elasticsearch    │
+│  cloudwatch (P)│───▶│  raw.k8s-events                           │    │  (np-events idx)  │
+│  k8s-events (G)│───▶│  raw.syslog                ┌──────────┐   │───▶│                   │
+│  syslog     (P)│───▶│  raw.security        ────▶ │   sink   │ ──┼───▶│  Redis (counters, │
+│  security   (G)│───▶│  raw.nginx                 │   (Go)   │   │    │   recent, tput)   │
+│  nginx      (P)│───▶│                            └──────────┘   │───▶│                   │
+└────────────────┘    │                                  ▲        │    │  TimescaleDB      │
+                      │  events.normalized               │        │    │  (event_metrics)  │
+       NiFi (visual)  │  events.info / warn / error /    │        │    │                   │
+       runs alongside │  critical                        │        │    │  MinIO (cold,     │
+       (not on path)  │  metrics.aggregated              │        │    │   bucket created) │
+                      └───────────────────────────────────────────┘    └─────────┬─────────┘
+                                                                                  │
+                      ┌───────────────────────────────┐    ┌──────────────────────▼─────────┐
+                      │  Query API (Go) :8090         │    │  AI Assistant (Python) :8091   │
+                      │   GET /api/v1/stats           │◀───┤   POST /api/v1/ask             │
+                      │   GET /api/v1/recent          │    │   (calls Query API for facts)  │
+                      │   GET /api/v1/search          │    └──────────────┬─────────────────┘
+                      │   GET /api/v1/throughput      │                   │
+                      │   GET /api/v1/sources         │                   │
+                      └──────────────┬────────────────┘                   │
+                                     │                                    │
+                                     ▼                                    ▼
+                      ┌─────────────────────────────────────────────────────────┐
+                      │  Main Dashboard :8080  (HTML + Tailwind + JS)           │
+                      │   live stats · recent events · service tiles · AI chat  │
+                      └─────────────────────────────────────────────────────────┘
+```
 
-| Key | Contents |
-|---|---|
-| `np_theme` | `"dark"` or `"light"` — theme preference |
-| `np_custom_connectors` | JSON array of user-defined connector specs |
-| `np_disabled` | JSON array of connector IDs that are currently paused |
-| `np_chat` | JSON array of AI chat message history |
+**Why this shape:**
 
-To fully reset the app: open DevTools → Application → Local Storage → clear the four `np_*` keys, then refresh.
-
----
-
-## Customization & extending
-
-### Add a new severity color
-
-Edit `SEV_STYLE` in the `<script>` block. Each entry is `{ bg, fg }` of Tailwind classes.
-
-### Add event templates for a custom connector
-
-In `EVENT_TEMPLATES`, add an entry keyed by the connector's `id`. Each template is `{ sev, msg, payload: () => ({...}) }`. The payload function runs every time an event is generated, so it can include random data.
-
-### Change tick rate
-
-In `startSim()`, change `setInterval(tick, 2000)` — the value is milliseconds per tick. Each tick generates 1-5 events.
-
-### Add a new AI pattern
-
-In `generateAIReply(q)`, add a new `if (/your regex/i.test(Q)) return '...'` block above the default fallback. Keep replies short, structured, and contextual to the simulated data.
-
-### Modify the production architecture diagram
-
-The SVG is inline in §07 of `index.html`. It's hand-laid-out with explicit `x`/`y` coordinates — modify the rect/text/line elements directly. Keep `viewBox="0 0 1320 600"` unless rebuilding the whole layout.
-
----
-
-## License & attribution
-
-Simulation only — no real data, no telemetry, no network requests beyond the Tailwind CDN and Google Fonts on first paint. Use freely as a reference, demo, or starting point.
-
-**External resources loaded:**
-
-- Tailwind CSS — `https://cdn.tailwindcss.com`
-- Simple Plex Sans + Plex Mono — `https://fonts.googleapis.com`
-
-That's the complete dependency list.
+- **Connectors produce directly to Kafka**, each to its own `raw.*` topic. This is what real production agents do (Fluent Bit, Vector, custom collectors).
+- **The sink service replaces NiFi in the runtime path** — for a single-machine POC, a Go consumer is simpler than configuring NiFi processors. NiFi is included so you can see how the same flow would be built visually for production (see [nifi/README.md](./nifi/README.md)).
+- **Three storage backends**, each for what it's best at: Elasticsearch (search), Redis (hot counters), TimescaleDB (time-series aggregations).
+- **The Query API hides the storage tier** — callers don't need to know whether the data came from Redis or ES.
+- **The AI assistant is grounded** — it pulls live facts from the Query API before answering, simulating RAG.
 
 ---
 
-*Built as a single-file simulation of the production architecture documented in §07. Open `index.html` and start clicking.*
+## Port map & credentials
+
+| Port | Service | URL | Credentials |
+|---:|---|---|---|
+| **8080** | **Main dashboard** | <http://localhost:8080> | — |
+| 8443 | Apache NiFi (HTTPS) | <https://localhost:8443> | `admin` / `ctsBtRBKHRAx69EqUghvvgEvjnaLjFEB` |
+| 9092 | Kafka (internal listener) | `kafka:9092` (inside containers) | — |
+| 9094 | Kafka (external listener) | `localhost:9094` | — |
+| 8181 | Kafka UI | <http://localhost:8181> | — |
+| 9200 | Elasticsearch HTTP | <http://localhost:9200> | security disabled |
+| 5601 | Kibana | <http://localhost:5601> | — |
+| 8123 | ClickHouse HTTP | <http://localhost:8123/play> | `nimbus` / `nimbus` |
+| 9100 | ClickHouse native | `localhost:9100` | `nimbus` / `nimbus` |
+| 6379 | Redis | `localhost:6379` | — |
+| 8182 | Redis Commander | <http://localhost:8182> | — |
+| 5432 | TimescaleDB | `localhost:5432` | `nimbus` / `nimbus`, db `metrics` |
+| 8888 | Adminer | <http://localhost:8888> | System: PostgreSQL · Server: `timescaledb` · User: `nimbus` · Pass: `nimbus` · DB: `metrics` |
+| 9000 | MinIO API (S3) | `localhost:9000` | `nimbus` / `nimbus-secret` |
+| 9001 | MinIO Console | <http://localhost:9001> | `nimbus` / `nimbus-secret` |
+| 3000 | Grafana | <http://localhost:3000> | `admin` / `nimbus`, or anonymous viewer |
+| 8090 | Query API (Go) | <http://localhost:8090> | — |
+| 8091 | AI Assistant (Python) | <http://localhost:8091/docs> | — |
+| 8092 | ETL API (Python) | <http://localhost:8092/docs> | — |
+| 8080 | ETL Upload Form | <http://localhost:8080/etl/> | — |
+
+> Tip: run `make urls` to print this list with one command.
+
+---
+
+## Service-by-service tour
+
+### Apache NiFi (port 8443)
+
+The visual dataflow orchestrator. In production it would receive data from the ingest gateways and route it to Kafka, performing schema validation, enrichment, and PII masking along the way. In this POC NiFi runs as a clean canvas — see [nifi/README.md](./nifi/README.md) for what the production flow would look like, processor by processor.
+
+**First time you open NiFi:**
+
+1. Browse to <https://localhost:8443>
+2. Accept the self-signed certificate warning
+3. Log in with `admin` / `ctsBtRBKHRAx69EqUghvvgEvjnaLjFEB`
+4. You'll land on an empty canvas — drag processors from the top toolbar to build a flow
+
+**Or load the sample flow with one command:**
+
+```bash
+make nifi-load    # builds + starts the "Security Pipeline" sample flow
+make nifi-status  # show its current throughput
+```
+
+This routes the `security-sim` connector's stream into severity-specific Kafka topics (`events.critical`, `events.error`, `events.normalized`).
+
+**Want to build it manually instead?** See [nifi/STEP-BY-STEP.md](./nifi/STEP-BY-STEP.md) — a focused 15-minute UI tutorial that walks through each processor click-by-click. Or [nifi/HOW-TO.md](./nifi/HOW-TO.md) for all three loading options plus extension ideas (S3 archive, ES indexing, PII masking).
+
+### Apache Kafka (KRaft mode, port 9092 internal / 9094 external)
+
+Latest official `apache/kafka` image, configured for KRaft (no ZooKeeper). One broker, three partitions per topic, replication factor 1 (POC-only — production uses 3).
+
+Topics are auto-created by `kafka-init` on startup:
+
+- `raw.cloudwatch`, `raw.k8s-events`, `raw.syslog`, `raw.security`, `raw.nginx` — one per connector
+- `events.normalized`, `events.info`, `events.warn`, `events.error`, `events.critical` — production targets (unused by the POC sink, but ready for NiFi)
+- `metrics.aggregated` — for Flink-style rollups
+
+**Inspecting messages:**
+
+- **Kafka UI**: <http://localhost:8181> — point and click
+- **CLI**:
+  ```bash
+  docker exec -it np-kafka /opt/kafka/bin/kafka-console-consumer.sh \
+    --bootstrap-server localhost:9092 \
+    --topic raw.k8s-events --from-beginning
+  ```
+
+### Elasticsearch + Kibana (ports 9200 + 5601)
+
+Elasticsearch 8.15.3 with security disabled (POC only). The sink service creates the `np-events` index on startup with an explicit mapping: `time` and `ingestedAt` are dates, `severity`/`source` are keywords, `message` is full-text.
+
+**First time you open Kibana:**
+
+1. Browse to <http://localhost:5601>
+2. Sidebar → **Discover**
+3. **Create data view** → name: `np-events`, index pattern: `np-events`, time field: `time`
+4. **Save**, then explore live events
+
+### ClickHouse (ports 8123 HTTP, 9100 native)
+
+Latest server image with a database `nimbuspulse` and user `nimbus`. Used as a placeholder for OLAP workloads — the sink doesn't write here in the POC, but ClickHouse is provisioned and the Grafana datasource is pre-wired.
+
+Open <http://localhost:8123/play> to use the built-in SQL playground.
+
+### Redis + Redis Commander (ports 6379 + 8182)
+
+Redis 7 alpine stores:
+
+- `np:counter:total` — total events ingested
+- `np:counter:sev:{LEVEL}` — count by severity
+- `np:counter:source:{ID}` — count by source
+- `np:recent` — most recent 200 events as a list
+- `np:tput:{0..59}` — 60-bucket per-second throughput ring (90s TTL)
+
+Browse with Redis Commander at <http://localhost:8182>.
+
+### TimescaleDB + Adminer (ports 5432 + 8888)
+
+PostgreSQL 16 with the TimescaleDB extension. The sink creates a hypertable on first run:
+
+```sql
+CREATE TABLE event_metrics (
+  ts        TIMESTAMPTZ NOT NULL,
+  source    TEXT NOT NULL,
+  severity  TEXT NOT NULL,
+  count     INTEGER NOT NULL DEFAULT 1
+);
+SELECT create_hypertable('event_metrics', 'ts');
+```
+
+Each event becomes one row. Useful queries via Adminer (<http://localhost:8888>):
+
+```sql
+SELECT source, severity, count(*)
+FROM event_metrics
+WHERE ts > now() - interval '5 minutes'
+GROUP BY 1, 2
+ORDER BY 3 DESC;
+
+SELECT time_bucket('30 seconds', ts) AS bucket, severity, count(*)
+FROM event_metrics
+WHERE ts > now() - interval '5 minutes'
+GROUP BY 1, 2
+ORDER BY 1;
+```
+
+### MinIO (ports 9000 API + 9001 Console)
+
+S3-compatible object storage. Two buckets are created on startup by `minio-init`:
+
+- `np-cold-events`
+- `np-cold-archive`
+
+In production, the sink (or a Kafka Connect S3 sink) would write older events here in Parquet format with an Iceberg manifest. POC doesn't push data here; the buckets are ready when you want to.
+
+Console: <http://localhost:9001> · user `nimbus` · password `nimbus-secret`.
+
+### Grafana (port 3000)
+
+Latest Grafana with anonymous viewer enabled and three datasources pre-wired:
+
+- **TimescaleDB** (default) — query the `event_metrics` hypertable
+- **Elasticsearch** — query the `np-events` index
+- **ClickHouse** — via the official `grafana-clickhouse-datasource` plugin
+
+To build a dashboard:
+
+1. <http://localhost:3000> → log in (`admin` / `nimbus`) or use anonymous viewer
+2. **Explore** → pick TimescaleDB → write SQL or use the visual builder
+3. Or **Dashboards → New** to assemble panels
+
+### Sink service (Go, no exposed port)
+
+Internal-only Go service. One Kafka consumer goroutine per `raw.*` topic. For each message:
+
+1. Decode JSON event
+2. Enrich (add `ingestedAt`, `enrichment.traceId`, simple PII mask)
+3. Write to Elasticsearch (`POST /np-events/_doc/{id}`)
+4. Write to Redis (pipeline: counters, recent list, throughput bucket)
+5. Write to TimescaleDB (`INSERT INTO event_metrics`)
+
+Watch it work with `make logs-sink`. Stats logged every 15s.
+
+### Query API (Go, port 8090)
+
+Thin REST API on top of Elasticsearch + Redis. CORS-open so the dashboard at `:8080` can call it from the browser.
+
+### AI Assistant (Python FastAPI, port 8091)
+
+A simulated LLM assistant. Routes by keyword to one of ~10 grounded responses, each of which calls the Query API for live facts (stats, top sources, recent events) before answering.
+
+**OpenAPI docs:** <http://localhost:8091/docs>
+
+This is the staffing of the LLM/RAG layer in the production architecture. Plug in a real LLM here (Claude, GPT, local) by replacing `_generate_answer` and adding embedding-based retrieval.
+
+### ETL API (Python FastAPI, port 8092) + Upload Form (`/etl/`)
+
+A separate FastAPI service that accepts file uploads, extracts text and (where applicable) images, and stores results in MinIO + Elasticsearch. **The Extract-Transform-Load classic, end to end.**
+
+**Two ways to use it:**
+
+- **UI:** open <http://localhost:8080/etl/> for a drag-drop upload form with live pipeline stages, an examples sidebar, and a documents library
+- **API:** `POST /api/v1/etl/upload` (multipart/form-data). OpenAPI docs at <http://localhost:8092/docs>
+
+**Supported file types** (auto-detected):
+
+| Type | Extract | Library |
+|---|---|---|
+| PDF | text + embedded images + OCR per image | `pdfminer.six` + `PyMuPDF` + `pytesseract` |
+| Images (PNG/JPG/etc) | OCR text + dimensions + format | `pytesseract` + `Pillow` |
+| CSV | header detection, sample rows, row/col counts | stdlib `csv` |
+| JSON | schema flatten + top-level key inventory | stdlib `json` |
+| HTML | tag strip + title/heading/link extraction | `BeautifulSoup4` |
+| Plain text / logs / source | UTF-8 decode + line/word/char counts | stdlib |
+
+**Transform stage** applies to all:
+
+- **PII redaction** — regex masks emails, credit-card numbers, SSN-style strings → replaced with `[EMAIL]`, `[CARD]`, `[SSN]`
+- **Language detection** — English-word frequency heuristic → `metadata.language`
+- **SHA-256 hash** — dedup key on first 16 chars of extracted-text hash
+
+**Load stage** writes to three places:
+
+- **MinIO bucket `np-cold-archive`** — original raw file at `raw/{docId}/{filename}`
+- **MinIO bucket `np-cold-events`** — extracted images at `images/{docId}/page_N_img_M.png`
+- **Elasticsearch index `np-documents`** — normalized document JSON with text + metadata for search
+
+**Kafka emissions** — every pipeline stage emits an event to topic `etl.events`:
+
+```
+received → extract.start → extract.done → transform.done
+→ load.minio → load.elasticsearch → complete    (+ error if any stage fails)
+```
+
+These events flow into the **second NiFi sample flow** ("ETL Events Pipeline") that the load-flow script builds — see [nifi/HOW-TO.md](./nifi/HOW-TO.md).
+
+**Quick smoke test:**
+
+```bash
+make etl-test     # uploads a sample CSV, lists what got indexed
+```
+
+Or upload anything by hand at <http://localhost:8080/etl/>, then verify in:
+
+- **MinIO Console** (<http://localhost:9001>) — buckets `np-cold-archive`, `np-cold-events`
+- **Kibana** (<http://localhost:5601>) — create a data view for index `np-documents`
+- **Kafka UI** (<http://localhost:8181>) — topic `etl.events`
+
+### Sample connectors (5 containers, no exposed ports)
+
+Each connector is a single file that:
+
+1. Waits for Kafka to be ready (with retries)
+2. Generates synthetic events at the configured rate (env var `RATE_PER_SEC`)
+3. JSON-serializes and publishes to its `raw.*` topic
+4. Logs every 25 events
+
+| Connector | Language | Topic | Rate (default) | Sample event types |
+|---|---|---|---:|---|
+| cloudwatch | Python | `raw.cloudwatch` | 3/s | Lambda timeouts, alarms, runtime errors |
+| k8s-events | Go | `raw.k8s-events` | 4/s | Scheduled, Pulled, OOMKilled, ImagePullBackOff |
+| syslog | Python | `raw.syslog` | 5/s | sshd failures, kernel OOM, cron, BUG |
+| security | Go | `raw.security` | 2/s | Failed logins, WAF blocks, credential stuffing, malware |
+| nginx | Python | `raw.nginx` | 8/s | 200/304/401/404/500/502/504 with paths & UAs |
+
+Tweak rates by editing the `RATE_PER_SEC` env in `docker-compose.yml` and running `docker compose up -d connector-X`.
+
+---
+
+## First-time setup notes
+
+After `docker compose up -d`, in order:
+
+1. **(0s)** Kafka starts; healthcheck takes ~20s
+2. **(~20s)** `kafka-init` creates topics, exits cleanly (this is expected — `Exited (0)` is success)
+3. **(~25s)** All 5 connectors start producing
+4. **(~30s)** Elasticsearch becomes healthy
+5. **(~35s)** Sink starts consuming, creates ES index + Timescale hypertable
+6. **(~60s)** NiFi finishes its long startup
+7. **(anytime)** Open <http://localhost:8080>
+
+If you open the dashboard before the sink starts, you'll see "query-api unreachable" for a few seconds. It self-recovers — just wait.
+
+---
+
+## API reference
+
+### Query API — `http://localhost:8090`
+
+| Endpoint | Method | Returns |
+|---|---|---|
+| `/healthz` | GET | `{status: "ok", uptime}` |
+| `/api/v1/stats` | GET | Counters from Redis: total, bySeverity, bySource, errorRate |
+| `/api/v1/recent?n=50` | GET | Most recent N events (max 200) from Redis list |
+| `/api/v1/search?q=&sev=&source=&size=20` | GET | Elasticsearch search; returns hits + total |
+| `/api/v1/throughput` | GET | 60-bucket events-per-second ring from Redis |
+| `/api/v1/sources` | GET | Elasticsearch terms aggregation on `source` |
+
+Examples:
+
+```bash
+curl http://localhost:8090/api/v1/stats | jq .
+curl 'http://localhost:8090/api/v1/search?sev=ERROR&size=5' | jq '.hits[].message'
+curl 'http://localhost:8090/api/v1/recent?n=3' | jq .
+curl http://localhost:8090/api/v1/throughput | jq '.series[-10:]'
+```
+
+### AI Assistant — `http://localhost:8091`
+
+| Endpoint | Method | Body / params | Returns |
+|---|---|---|---|
+| `/healthz` | GET | — | `{status, service}` |
+| `/api/v1/prompts` | GET | — | List of suggested prompts |
+| `/api/v1/ask` | POST | `{"question": "..."}` | `{answer, citations, facts, latencyMs}` |
+| `/docs` | GET | — | OpenAPI Swagger UI |
+
+Example:
+
+```bash
+curl -X POST http://localhost:8091/api/v1/ask \
+  -H 'Content-Type: application/json' \
+  -d '{"question": "summarize the last few minutes"}' | jq .
+```
+
+---
+
+## Troubleshooting
+
+**Elasticsearch dies on startup with exit 137 / OOMKilled**
+
+Raise Docker's memory limit (Docker Desktop → Settings → Resources → Memory ≥ 6 GB), or reduce `ES_JAVA_OPTS` in `docker-compose.yml` from `-Xms1g -Xmx1g` to `-Xms512m -Xmx512m`.
+
+**Port conflict on startup**
+
+Something else is using one of the ports. Find it: `lsof -i :8080` (or whichever port). Either stop the conflicting process, or edit the port mapping in `docker-compose.yml` (e.g. `"8081:80"` for the dashboard).
+
+**`kafka-init` shows as Exited(0) — is that broken?**
+
+No, that's correct. `kafka-init` is a one-shot container: it creates topics, prints the list, and exits cleanly. Compose marks it stopped because it's done.
+
+**Dashboard shows "query-api unreachable"**
+
+The Query API needs Elasticsearch and Redis up first. Check `docker compose ps` for healthy status. If still failing: `docker logs np-query-api`.
+
+**NiFi takes forever to start**
+
+Normal — NiFi's startup is slow (60-90s). Watch `docker logs -f np-nifi`. When you see `JettyServer NiFi has started`, it's ready.
+
+**Connectors not producing events**
+
+Check the connector logs: `docker logs np-conn-cloudwatch` (or whichever). They retry Kafka connection on a loop. If you see repeated "Kafka not ready", ensure `np-kafka` is healthy.
+
+**I want to wipe everything and start fresh**
+
+```bash
+docker compose down -v   # or: make reset
+docker compose up -d     # or: make up
+```
+
+---
+
+## Extending the POC
+
+### Add a new connector (Python version)
+
+1. Copy `connectors/cloudwatch-sim/` to `connectors/myservice-sim/`
+2. Edit `app.py`: change `TOPIC` env default and the templates in `EVENT_TEMPLATES`
+3. In `docker-compose.yml`, add a new service block (copy `connector-cloudwatch`, change name, build path, container_name, and `TOPIC` env)
+4. Add the topic to `kafka-init`'s `for t in ...` list
+5. `docker compose up -d --build connector-myservice`
+
+### Add a new connector (Go version)
+
+Same flow, but copy `connectors/k8s-events-sim/` and edit `main.go`.
+
+### Plug in a real LLM
+
+In `services/ai-assistant/app.py`, replace `_generate_answer` with a call to your LLM provider. The `facts` dict is already populated with live stats, recent events, and source counts — pass it as system context.
+
+### Add NiFi to the runtime path
+
+1. Open <https://localhost:8443>
+2. Drag in a **ConsumeKafkaRecord_2_6** processor, point at `raw.k8s-events`
+3. Chain **EvaluateJsonPath → UpdateAttribute → ReplaceText → RouteOnAttribute → PublishKafkaRecord_2_6** publishing to `events.normalized`
+4. Modify the sink service to consume `events.normalized` instead of the raw topics
+
+### Add Grafana dashboards
+
+Datasources are already wired. In Grafana:
+
+1. **Dashboards → New → Add visualization**
+2. Pick **TimescaleDB**
+3. Query: `SELECT time_bucket('30 seconds', ts) AS time, severity, count(*) FROM event_metrics WHERE $__timeFilter(ts) GROUP BY 1, 2`
+4. Visualization: Time series, stacked
+
+---
+
+## File layout
+
+```
+nimbuspulse-poc/
+├── docker-compose.yml          # 18 services, named volumes, healthchecks
+├── Makefile                    # convenience targets (up/down/logs/test/urls)
+├── README.md                   # this file
+│
+├── dashboard/                  # main demo dashboard
+│   ├── Dockerfile              # nginx:1.27-alpine
+│   ├── nginx.conf
+│   └── index.html              # Tailwind + vanilla JS + SVG, ~600 lines
+│
+├── services/
+│   ├── sink/                   # Go: Kafka → ES + Redis + Timescale
+│   │   ├── Dockerfile          # multi-stage, distroless-style alpine
+│   │   ├── go.mod
+│   │   └── main.go
+│   ├── query-api/              # Go: REST API on top of storage
+│   │   ├── Dockerfile
+│   │   ├── go.mod
+│   │   └── main.go
+│   └── ai-assistant/           # Python FastAPI: simulated LLM
+│       ├── Dockerfile
+│       ├── requirements.txt
+│       └── app.py
+│
+├── connectors/
+│   ├── cloudwatch-sim/         # Python — AWS CloudWatch
+│   ├── k8s-events-sim/         # Go — Kubernetes events
+│   ├── syslog-sim/             # Python — Syslog RFC 5424
+│   ├── security-sim/           # Go — SIEM / WAF / auth
+│   └── nginx-sim/              # Python — Nginx access
+│
+├── nifi/
+│   └── README.md               # what the production NiFi flow looks like
+│
+└── config/
+    └── grafana-datasources.yml # provisioned datasources
+```
+
+---
+
+## What's intentionally NOT in this POC
+
+To keep the surface area manageable:
+
+- **No authentication or TLS** anywhere (NiFi has its own self-signed cert; everything else is open inside Docker)
+- **Single-broker Kafka** (production: 3+ for replication)
+- **Single-node Elasticsearch** (production: 3+ master + data nodes)
+- **No schema registry** (the simulation has one; here it's implicit in connector code)
+- **No real Flink job** (Timescale aggregations + Redis counters cover the analytics need)
+- **No real LLM** in the AI assistant (pattern-matched routing)
+- **Connectors generate synthetic data** rather than connecting to real cloud APIs
+
+All of these are deliberate POC simplifications; the architecture supports each of them as drop-in upgrades.
+
+---
+
+*Open <http://localhost:8080> and start clicking.*

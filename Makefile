@@ -4,7 +4,7 @@
 # =====================================================================
 
 .PHONY: help up down restart logs ps clean reset test stats topics urls \
-        logs-sink logs-conn logs-api logs-ai build \
+        logs-sink logs-conn logs-api logs-ai logs-etl build etl-test \
         nifi-load nifi-start nifi-stop nifi-status nifi-delete
 
 help:
@@ -19,6 +19,7 @@ help:
 	@echo "  make logs-api  — tail query-api + ai-assistant"
 	@echo "  make build     — rebuild custom images (sink, query-api, etc.)"
 	@echo "  make test      — smoke-test the Query API endpoints"
+	@echo "  make etl-test  — upload a sample file to the ETL API"
 	@echo "  make stats     — show event counters from Redis"
 	@echo "  make topics    — list Kafka topics"
 	@echo "  make urls      — print all service URLs"
@@ -60,12 +61,27 @@ logs-conn:
 		connector-security connector-nginx
 
 logs-api:
-	docker compose logs -f --tail=50 query-api ai-assistant
+	docker compose logs -f --tail=50 query-api ai-assistant etl-api
+
+logs-etl:
+	docker compose logs -f --tail=100 etl-api
 
 build:
-	docker compose build sink query-api ai-assistant dashboard \
+	docker compose build sink query-api ai-assistant etl-api dashboard \
 		connector-cloudwatch connector-k8s-events connector-syslog \
 		connector-security connector-nginx
+
+etl-test:
+	@echo "→ Creating sample CSV..."
+	@printf "user,event,severity,count\njane,login,INFO,42\nmark,logout,INFO,18\nguest,fail,ERROR,1\n" > /tmp/etl-sample.csv
+	@echo "→ POSTing to ETL API..."
+	@curl -s -F "file=@/tmp/etl-sample.csv" http://localhost:8092/api/v1/etl/upload | jq . 2>/dev/null || \
+		curl -s -F "file=@/tmp/etl-sample.csv" http://localhost:8092/api/v1/etl/upload
+	@echo ""
+	@echo "→ Listing recent documents..."
+	@curl -s 'http://localhost:8092/api/v1/etl/documents?size=3' | jq '.hits[] | {docId, sourceFile, extractor, wordCount}' 2>/dev/null || \
+		curl -s 'http://localhost:8092/api/v1/etl/documents?size=3'
+	@rm -f /tmp/etl-sample.csv
 
 test:
 	@echo "→ /healthz"
@@ -110,6 +126,8 @@ urls:
 	@echo "── Custom services ──"
 	@echo "  Query API     → http://localhost:8090/api/v1/stats"
 	@echo "  AI Assistant  → http://localhost:8091/docs"
+	@echo "  ETL API       → http://localhost:8092/docs"
+	@echo "  ETL Upload    → http://localhost:8080/etl/"
 
 clean:
 	docker compose down
