@@ -690,6 +690,90 @@ def get_document(doc_id: str):
         raise HTTPException(502, f"elasticsearch unreachable: {e}")
 
 
+@app.get("/api/v1/etl/documents/{doc_id}/raw")
+def get_raw_file(doc_id: str):
+    """Stream the original uploaded file back from MinIO.
+
+    Looks up the doc to find the source filename, then fetches
+    raw/{doc_id}/{filename} from the np-cold-archive bucket.
+    """
+    from fastapi.responses import StreamingResponse
+
+    try:
+        r = httpx.get(f"{ES_URL}/{ES_INDEX}/_doc/{doc_id}", timeout=10.0)
+        if r.status_code == 404:
+            raise HTTPException(404, "document not found")
+        doc = r.json().get("_source", {})
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"elasticsearch unreachable: {e}")
+
+    source_file = doc.get("sourceFile", "")
+    media_type = doc.get("mediaType", "application/octet-stream")
+    if not source_file:
+        raise HTTPException(404, "source filename missing on document")
+
+    key = f"raw/{doc_id}/{source_file}"
+    try:
+        mc = minio_client()
+        response = mc.get_object(BUCKET_RAW, key)
+        # Wrap MinIO response in a generator that closes properly
+        def stream():
+            try:
+                for chunk in response.stream(64 * 1024):
+                    yield chunk
+            finally:
+                response.close()
+                response.release_conn()
+
+        return StreamingResponse(
+            stream(),
+            media_type=media_type,
+            headers={"Content-Disposition": f'inline; filename="{source_file}"'},
+        )
+    except S3Error as e:
+        log.error("MinIO get_object failed for %s: %s", key, e)
+        raise HTTPException(404, f"raw file not found in MinIO: {key}")
+
+
+@app.get("/api/v1/etl/documents/{doc_id}/images/{image_index}")
+def get_image(doc_id: str, image_index: int):
+    """Stream an extracted image back from MinIO by its position in the images array."""
+    from fastapi.responses import StreamingResponse
+
+    try:
+        r = httpx.get(f"{ES_URL}/{ES_INDEX}/_doc/{doc_id}", timeout=10.0)
+        if r.status_code == 404:
+            raise HTTPException(404, "document not found")
+        doc = r.json().get("_source", {})
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"elasticsearch unreachable: {e}")
+
+    images = doc.get("images", [])
+    if image_index < 0 or image_index >= len(images):
+        raise HTTPException(404, "image index out of range")
+    img = images[image_index]
+    key = img.get("key")
+    if not key:
+        raise HTTPException(404, "image key missing")
+
+    try:
+        mc = minio_client()
+        response = mc.get_object(BUCKET_IMAGES, key)
+        def stream():
+            try:
+                for chunk in response.stream(64 * 1024):
+                    yield chunk
+            finally:
+                response.close()
+                response.release_conn()
+        # Most extracted images are PNG (PyMuPDF normalizes to PNG)
+        ctype = "image/png" if key.endswith(".png") else "image/jpeg"
+        return StreamingResponse(stream(), media_type=ctype)
+    except S3Error as e:
+        log.error("MinIO get_object failed for %s: %s", key, e)
+        raise HTTPException(404, f"image not found in MinIO: {key}")
+
+
 @app.get("/api/v1/etl/examples")
 def examples():
     """Sample ETL flows the user can read about and try."""

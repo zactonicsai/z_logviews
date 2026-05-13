@@ -361,6 +361,20 @@ docker compose ps         # status</pre>
   </div>
 </section>
 
+<!-- ETL DOCUMENT DETAIL MODAL -->
+<div id="etlModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4">
+  <div class="absolute inset-0 bg-ibm-gray100/70 backdrop-blur-sm" onclick="etlCloseModal()"></div>
+  <div class="relative bg-white dark:bg-ibm-gray90 border border-ibm-gray20 dark:border-ibm-gray80 max-w-4xl w-full max-h-[88vh] overflow-y-auto">
+    <div class="px-5 py-3 border-b border-ibm-gray20 dark:border-ibm-gray80 flex items-center justify-between sticky top-0 bg-white dark:bg-ibm-gray90 z-10">
+      <h3 id="etlModalTitle" class="font-medium text-sm truncate pr-4">—</h3>
+      <button onclick="etlCloseModal()" class="text-ibm-gray70 dark:text-ibm-gray30 hover:text-ibm-blue text-2xl leading-none flex-shrink-0">×</button>
+    </div>
+    <div id="etlModalBody" class="p-5 text-sm">
+      <div class="text-center text-ibm-gray50 font-mono text-xs py-10">loading…</div>
+    </div>
+  </div>
+</div>
+
 <!-- FOOTER -->
 <footer class="bg-ibm-gray10/40 dark:bg-ibm-gray100">
   <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col sm:flex-row justify-between gap-3 text-xs text-ibm-gray70 dark:text-ibm-gray30 font-mono">
@@ -738,9 +752,10 @@ document.getElementById('etlUploadBtn').addEventListener('click', async () => {
         <div><div class="text-ibm-gray50 text-[10px]">images</div><div>${result.imageCount}</div></div>
       </div>
       <div class="flex flex-wrap gap-2 mt-3">
-        <a href="/etl/" target="_blank" class="px-2 py-1 text-[11px] font-mono bg-ibm-blue text-white hover:bg-ibm-blue70 transition">view in full UI →</a>
-        <a href="http://${HOST}:9001" target="_blank" class="px-2 py-1 text-[11px] font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">MinIO →</a>
-        <a href="http://${HOST}:5601" target="_blank" class="px-2 py-1 text-[11px] font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Kibana →</a>
+        <button onclick="etlViewDoc('${etlEscape(result.docId)}')" class="px-3 py-1 text-[11px] font-mono bg-ibm-blue text-white hover:bg-ibm-blue70 transition">view extracted content →</button>
+        <a href="${ETL}/api/v1/etl/documents/${result.docId}/raw" target="_blank" class="px-3 py-1 text-[11px] font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">open raw file ↗</a>
+        <a href="http://${HOST}:9001" target="_blank" class="px-3 py-1 text-[11px] font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">MinIO →</a>
+        <a href="http://${HOST}:5601" target="_blank" class="px-3 py-1 text-[11px] font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">Kibana →</a>
       </div>`;
     document.getElementById('etlResult').classList.remove('hidden');
     etlLoadDocs();
@@ -767,15 +782,22 @@ async function etlLoadDocs() {
         `<div class="text-xs text-ibm-gray50 font-mono py-3">No documents yet. Upload one to see it here.</div>`;
       return;
     }
-    document.getElementById('etlDocList').innerHTML = hits.map(d => `
-      <a href="/etl/" target="_blank" class="block border border-ibm-gray20 dark:border-ibm-gray80 p-2 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">
+    document.getElementById('etlDocList').innerHTML = hits.map(d => {
+      const isImg = (d.mediaType || '').startsWith('image/') || (d.imageCount > 0);
+      const isText = !isImg;
+      return `
+      <button onclick="etlViewDoc('${etlEscape(d.docId)}')" class="w-full text-left border border-ibm-gray20 dark:border-ibm-gray80 p-2 hover:border-ibm-blue hover:bg-ibm-blue10 dark:hover:bg-ibm-blue80/10 transition group">
         <div class="flex items-center justify-between mb-1">
           <span class="chip bg-ibm-blue text-white">${etlEscape((d.extractor || '').split(' ')[0].toUpperCase())}</span>
           <span class="text-[10px] font-mono text-ibm-gray50">${(d.extractedAt || '').slice(11,19)}</span>
         </div>
-        <div class="text-xs font-medium truncate">${etlEscape(d.sourceFile || d.docId)}</div>
-        <div class="text-[10px] font-mono text-ibm-gray70 dark:text-ibm-gray30 mt-0.5">${d.wordCount || 0}w · ${d.imageCount || 0}img${d.pageCount ? ' · ' + d.pageCount + 'p' : ''}</div>
-      </a>`).join('');
+        <div class="text-xs font-medium truncate group-hover:text-ibm-blue">${etlEscape(d.sourceFile || d.docId)}</div>
+        <div class="text-[10px] font-mono text-ibm-gray70 dark:text-ibm-gray30 mt-0.5 flex items-center justify-between">
+          <span>${d.wordCount || 0}w · ${d.imageCount || 0}img${d.pageCount ? ' · ' + d.pageCount + 'p' : ''}</span>
+          <span class="text-ibm-blue opacity-0 group-hover:opacity-100 transition">view →</span>
+        </div>
+      </button>`;
+    }).join('');
   } catch {
     document.getElementById('etlDocList').innerHTML =
       `<div class="text-xs text-ibm-red font-mono py-3">ETL API offline. Try: curl http://${HOST}:8092/healthz</div>`;
@@ -783,6 +805,170 @@ async function etlLoadDocs() {
 }
 
 document.getElementById('etlRefreshDocs').addEventListener('click', etlLoadDocs);
+
+/* ============ ETL doc detail modal ============ */
+function etlOpenModal() {
+  const m = document.getElementById('etlModal');
+  m.classList.remove('hidden');
+  m.classList.add('flex');
+}
+function etlCloseModal() {
+  const m = document.getElementById('etlModal');
+  m.classList.add('hidden');
+  m.classList.remove('flex');
+  document.getElementById('etlModalBody').innerHTML =
+    '<div class="text-center text-ibm-gray50 font-mono text-xs py-10">loading…</div>';
+}
+window.etlCloseModal = etlCloseModal;
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !document.getElementById('etlModal').classList.contains('hidden')) {
+    etlCloseModal();
+  }
+});
+
+async function etlViewDoc(docId) {
+  document.getElementById('etlModalTitle').textContent = docId;
+  document.getElementById('etlModalBody').innerHTML =
+    '<div class="text-center text-ibm-gray50 font-mono text-xs py-10">loading…</div>';
+  etlOpenModal();
+
+  try {
+    const r = await fetch(`${ETL}/api/v1/etl/documents/${docId}`);
+    if (!r.ok) throw new Error(r.statusText);
+    const d = await r.json();
+
+    const mediaType = d.mediaType || '';
+    const isImage = mediaType.startsWith('image/');
+    const isPdf = mediaType === 'application/pdf';
+    const isJson = mediaType === 'application/json';
+    const isHtml = mediaType === 'text/html';
+    const rawUrl = `${ETL}/api/v1/etl/documents/${docId}/raw`;
+
+    // Render the title with the friendly filename
+    document.getElementById('etlModalTitle').textContent = d.sourceFile || docId;
+
+    // Inline previewer: image or text
+    let rawPreview = '';
+    if (isImage) {
+      rawPreview = `
+        <div class="border border-ibm-gray20 dark:border-ibm-gray80 p-3 bg-ibm-gray10/40 dark:bg-ibm-gray90/40 text-center">
+          <img src="${rawUrl}" alt="${etlEscape(d.sourceFile)}"
+               class="max-w-full max-h-[400px] mx-auto"
+               onerror="this.parentElement.innerHTML='<div class=&quot;text-xs text-ibm-red font-mono py-6&quot;>image not yet available in MinIO — try refresh in a moment</div>'"/>
+        </div>`;
+    } else if (isPdf) {
+      rawPreview = `
+        <div class="border border-ibm-gray20 dark:border-ibm-gray80 bg-ibm-gray10/40 dark:bg-ibm-gray90/40" style="height:480px">
+          <iframe src="${rawUrl}" class="w-full h-full" title="PDF preview"></iframe>
+        </div>`;
+    } else {
+      // text-like; the API streams it inline, so an iframe works as a quick viewer
+      rawPreview = `
+        <div class="border border-ibm-gray20 dark:border-ibm-gray80 bg-ibm-gray10/40 dark:bg-ibm-gray90/40" style="height:300px">
+          <iframe src="${rawUrl}" class="w-full h-full bg-white dark:bg-ibm-gray100" title="File preview"></iframe>
+        </div>`;
+    }
+
+    // Image grid (for PDFs with embedded images)
+    const imageGrid = (d.images && d.images.length) ? `
+      <div>
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">Extracted images (${d.images.length})</div>
+        <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
+          ${d.images.map((im, idx) => `
+            <button onclick="etlViewImage('${etlEscape(docId)}', ${idx})"
+                    class="border border-ibm-gray20 dark:border-ibm-gray80 p-1 text-xs hover:border-ibm-blue transition group bg-white dark:bg-ibm-gray100">
+              <div class="aspect-square bg-ibm-gray10 dark:bg-ibm-gray90 overflow-hidden flex items-center justify-center">
+                <img src="${ETL}/api/v1/etl/documents/${docId}/images/${idx}"
+                     alt="img ${idx+1}"
+                     loading="lazy"
+                     class="max-w-full max-h-full object-contain"
+                     onerror="this.style.display='none'; this.parentElement.innerHTML='<span class=&quot;text-[10px] text-ibm-gray50 font-mono p-2&quot;>preview unavailable</span>'"/>
+              </div>
+              <div class="text-[10px] font-mono mt-1 text-ibm-gray70 dark:text-ibm-gray30 truncate">
+                ${im.width || '?'}×${im.height || '?'} · p.${im.page || 1}
+              </div>
+            </button>`).join('')}
+        </div>
+      </div>` : '';
+
+    // Metadata table
+    const meta = d.metadata || {};
+    const metaRows = Object.entries(meta)
+      .filter(([k]) => !['sample','links','headings','schema'].includes(k))
+      .slice(0, 12)
+      .map(([k, v]) => {
+        const val = typeof v === 'object' ? JSON.stringify(v).slice(0, 100) : String(v).slice(0, 100);
+        return `<tr class="border-b border-ibm-gray20 dark:border-ibm-gray80">
+                  <td class="py-1.5 pr-3 text-ibm-gray70 dark:text-ibm-gray30 font-mono text-[11px]">${etlEscape(k)}</td>
+                  <td class="py-1.5 font-mono text-[11px] break-all">${etlEscape(val)}</td>
+                </tr>`;
+      }).join('');
+
+    // Extracted text preview
+    const text = d.text || '';
+    const textPreview = text ? `
+      <div>
+        <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">Extracted text · ${(d.wordCount || 0).toLocaleString()} words</div>
+        <pre class="bg-ibm-gray10 dark:bg-ibm-gray90 p-3 text-[11px] font-mono overflow-x-auto max-h-72 whitespace-pre-wrap">${etlEscape(text.slice(0, 8000))}${text.length > 8000 ? '\n\n…(truncated, ' + (text.length - 8000).toLocaleString() + ' more chars)' : ''}</pre>
+      </div>` : '';
+
+    document.getElementById('etlModalBody').innerHTML = `
+      <div class="space-y-5">
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+          <div><div class="text-ibm-gray50 text-[10px] uppercase">media</div><div class="break-all">${etlEscape(d.mediaType)}</div></div>
+          <div><div class="text-ibm-gray50 text-[10px] uppercase">extractor</div><div>${etlEscape(d.extractor)}</div></div>
+          <div><div class="text-ibm-gray50 text-[10px] uppercase">words / pages</div><div>${(d.wordCount||0).toLocaleString()} / ${d.pageCount||0}</div></div>
+          <div><div class="text-ibm-gray50 text-[10px] uppercase">extracted</div><div>${(d.extractedAt || '').replace('T',' ').slice(0,19)}</div></div>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <a href="${rawUrl}" target="_blank" class="px-3 py-1.5 text-xs font-mono bg-ibm-blue text-white hover:bg-ibm-blue70 transition">↗ open raw file in new tab</a>
+          <a href="${rawUrl}" download="${etlEscape(d.sourceFile)}" class="px-3 py-1.5 text-xs font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">⬇ download</a>
+          <span class="px-3 py-1.5 text-xs font-mono text-ibm-gray50 break-all">s3://${etlEscape(meta.rawObject || '').replace('s3://','')}</span>
+        </div>
+
+        <div>
+          <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">${isImage ? 'Image' : (isPdf ? 'PDF preview' : 'File contents')}</div>
+          ${rawPreview}
+        </div>
+
+        ${imageGrid}
+
+        ${textPreview}
+
+        ${metaRows ? `
+          <div>
+            <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-2">Metadata</div>
+            <table class="w-full">${metaRows}</table>
+          </div>` : ''}
+      </div>`;
+
+  } catch (e) {
+    document.getElementById('etlModalBody').innerHTML = `
+      <div class="text-center text-ibm-red font-mono text-xs py-10">
+        Failed to load document: ${etlEscape(String(e.message || e))}
+      </div>`;
+  }
+}
+window.etlViewDoc = etlViewDoc;
+
+async function etlViewImage(docId, idx) {
+  const url = `${ETL}/api/v1/etl/documents/${docId}/images/${idx}`;
+  document.getElementById('etlModalTitle').textContent = `Image ${idx + 1} · ${docId}`;
+  document.getElementById('etlModalBody').innerHTML = `
+    <div class="space-y-3">
+      <div class="border border-ibm-gray20 dark:border-ibm-gray80 p-3 bg-ibm-gray10/40 dark:bg-ibm-gray90/40 text-center">
+        <img src="${url}" alt="image ${idx + 1}" class="max-w-full max-h-[600px] mx-auto"/>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <a href="${url}" target="_blank" class="px-3 py-1.5 text-xs font-mono bg-ibm-blue text-white hover:bg-ibm-blue70 transition">↗ open raw in new tab</a>
+        <a href="${url}" download class="px-3 py-1.5 text-xs font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">⬇ download</a>
+        <button onclick="etlViewDoc('${etlEscape(docId)}')" class="px-3 py-1.5 text-xs font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">← back to document</button>
+      </div>
+    </div>`;
+}
+window.etlViewImage = etlViewImage;
 
 /* ============ Boot + loops ============ */
 renderChat();

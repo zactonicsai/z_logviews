@@ -549,6 +549,24 @@ async function viewDoc(docId) {
     const r = await fetch(`${ETL}/api/v1/etl/documents/${docId}`);
     const d = await r.json();
     document.getElementById('modalTitle').textContent = d.sourceFile || docId;
+
+    const mediaType = d.mediaType || '';
+    const isImage = mediaType.startsWith('image/');
+    const isPdf = mediaType === 'application/pdf';
+    const rawUrl = `${ETL}/api/v1/etl/documents/${docId}/raw`;
+
+    let preview = '';
+    if (isImage) {
+      preview = `<div class="border border-ibm-gray20 dark:border-ibm-gray80 p-3 bg-ibm-gray10/40 dark:bg-ibm-gray90/40 text-center">
+        <img src="${rawUrl}" class="max-w-full max-h-[400px] mx-auto"
+             onerror="this.parentElement.innerHTML='<div class=&quot;text-xs text-ibm-red font-mono py-6&quot;>image not yet available — refresh in a moment</div>'"/>
+      </div>`;
+    } else if (isPdf) {
+      preview = `<div class="border border-ibm-gray20 dark:border-ibm-gray80" style="height:480px"><iframe src="${rawUrl}" class="w-full h-full" title="PDF"></iframe></div>`;
+    } else {
+      preview = `<div class="border border-ibm-gray20 dark:border-ibm-gray80" style="height:280px"><iframe src="${rawUrl}" class="w-full h-full bg-white dark:bg-ibm-gray100" title="File"></iframe></div>`;
+    }
+
     document.getElementById('modalBody').innerHTML = `
       <div class="space-y-4">
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs font-mono">
@@ -560,6 +578,16 @@ async function viewDoc(docId) {
           <div><div class="text-ibm-gray50">images</div><div>${(d.images || []).length}</div></div>
         </div>
 
+        <div class="flex flex-wrap gap-2">
+          <a href="${rawUrl}" target="_blank" class="px-3 py-1.5 text-xs font-mono bg-ibm-blue text-white hover:bg-ibm-blue70 transition">↗ raw file</a>
+          <a href="${rawUrl}" download="${escapeHtml(d.sourceFile)}" class="px-3 py-1.5 text-xs font-mono border border-ibm-gray30 dark:border-ibm-gray70 hover:bg-ibm-gray10 dark:hover:bg-ibm-gray90 transition">⬇ download</a>
+        </div>
+
+        <div>
+          <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-1">${isImage ? 'Image' : (isPdf ? 'PDF preview' : 'File contents')}</div>
+          ${preview}
+        </div>
+
         ${d.metadata ? `
           <div>
             <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-1">Metadata</div>
@@ -569,13 +597,17 @@ async function viewDoc(docId) {
         ${d.images && d.images.length ? `
           <div>
             <div class="font-mono text-xs uppercase tracking-wider text-ibm-blue mb-1">Extracted images (${d.images.length})</div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              ${d.images.map(im => `
-                <div class="border border-ibm-gray20 dark:border-ibm-gray80 p-2 text-xs">
-                  <div class="font-mono text-[10px] text-ibm-gray50 break-all">${escapeHtml(im.key || im.uri || '')}</div>
-                  <div class="text-[10px] mt-1">${im.width || '?'}×${im.height || '?'} · ${humanSize(im.size || 0)}</div>
-                  ${im.ocrText ? `<div class="text-[10px] mt-1 italic line-clamp-2">"${escapeHtml(im.ocrText.slice(0, 100))}"</div>` : ''}
-                </div>`).join('')}
+            <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
+              ${d.images.map((im, idx) => `
+                <a href="${ETL}/api/v1/etl/documents/${docId}/images/${idx}" target="_blank"
+                   class="border border-ibm-gray20 dark:border-ibm-gray80 p-1 hover:border-ibm-blue transition block bg-white dark:bg-ibm-gray100">
+                  <div class="aspect-square bg-ibm-gray10 dark:bg-ibm-gray90 overflow-hidden flex items-center justify-center">
+                    <img src="${ETL}/api/v1/etl/documents/${docId}/images/${idx}"
+                         loading="lazy" class="max-w-full max-h-full object-contain"
+                         onerror="this.style.display='none'; this.parentElement.innerHTML='<span class=&quot;text-[10px] text-ibm-gray50 font-mono p-2&quot;>preview unavailable</span>'"/>
+                  </div>
+                  <div class="text-[10px] font-mono mt-1 text-ibm-gray70 dark:text-ibm-gray30 truncate">${im.width || '?'}×${im.height || '?'}${im.page ? ' · p.' + im.page : ''}</div>
+                </a>`).join('')}
             </div>
           </div>` : ''}
 
