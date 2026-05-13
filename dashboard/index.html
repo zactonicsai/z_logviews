@@ -281,7 +281,7 @@ const HOST = window.location.hostname || 'localhost';
 const url = (port, path='') => `http://${HOST}:${port}${path}`;
 
 const CORE_TILES = [
-  { name:'Apache NiFi',     desc:'Visual dataflow orchestrator. Build / inspect the production flow.', port:8443, scheme:'https',
+  { name:'Apache NiFi',     desc:'Visual dataflow orchestrator. Sample "Security Pipeline" flow can be loaded with `make nifi-load` (see nifi/HOW-TO.md).', port:8443, scheme:'https',
     badge:'DATAFLOW', color:'#0f62fe',
     creds:'admin / ctsBtRBKHRAx69EqUghvvgEvjnaLjFEB', note:'Self-signed cert — accept warning in browser.' },
   { name:'Kafka UI',         desc:'Browse topics, messages, consumer groups in real time.', port:8181, badge:'BUS', color:'#002d9c' },

@@ -1,0 +1,97 @@
+{
+  "_comment": "NimbusPulse — Security Pipeline (reference definition)",
+  "_note": "This file is a HUMAN-readable description of the flow. Use it as a guide when building manually in the UI, or as input to the load-flow.sh script. It is NOT a NiFi-importable .json file — NiFi 2.x flow export format requires registry-style metadata (UUIDs, bundle versions, encoding version) that the load-flow.sh script generates against your live NiFi instance.",
+
+  "name": "NimbusPulse Security Pipeline",
+  "description": "Consumes raw.security events from Kafka, extracts the severity field, and routes to severity-specific output topics.",
+
+  "processors": [
+    {
+      "id": 1,
+      "name": "Consume raw.security",
+      "type": "org.apache.nifi.processors.kafka.pubsub.ConsumeKafka_2_6",
+      "position": { "x": 0, "y": 0 },
+      "properties": {
+        "bootstrap.servers": "kafka:9092",
+        "topic": "raw.security",
+        "topic_type": "names",
+        "group.id": "nifi-security-pipeline",
+        "auto.offset.reset": "latest",
+        "Max Poll Records": "100",
+        "message-demarcator": "\n"
+      }
+    },
+    {
+      "id": 2,
+      "name": "Extract severity from JSON",
+      "type": "org.apache.nifi.processors.standard.EvaluateJsonPath",
+      "position": { "x": 300, "y": 0 },
+      "properties": {
+        "Destination": "flowfile-attribute",
+        "Return Type": "auto-detect",
+        "Path Not Found Behavior": "ignore",
+        "Null Value Representation": "empty string",
+        "severity": "$.severity",
+        "event_source": "$.source",
+        "event_message": "$.message"
+      },
+      "autoTerminatedRelationships": ["failure", "unmatched"]
+    },
+    {
+      "id": 3,
+      "name": "Route by severity",
+      "type": "org.apache.nifi.processors.standard.RouteOnAttribute",
+      "position": { "x": 600, "y": 0 },
+      "properties": {
+        "Routing Strategy": "Route to Property name",
+        "critical": "${severity:equals('CRITICAL')}",
+        "error":    "${severity:equals('ERROR')}"
+      }
+    },
+    {
+      "id": 4,
+      "name": "Publish → events.critical",
+      "type": "org.apache.nifi.processors.kafka.pubsub.PublishKafka_2_6",
+      "position": { "x": 900, "y": -150 },
+      "properties": {
+        "bootstrap.servers": "kafka:9092",
+        "topic": "events.critical",
+        "acks": "all",
+        "delivery-guarantee": "guarantee-replicated-delivery"
+      },
+      "autoTerminatedRelationships": ["success", "failure"]
+    },
+    {
+      "id": 5,
+      "name": "Publish → events.error",
+      "type": "org.apache.nifi.processors.kafka.pubsub.PublishKafka_2_6",
+      "position": { "x": 900, "y": 0 },
+      "properties": {
+        "bootstrap.servers": "kafka:9092",
+        "topic": "events.error",
+        "acks": "all"
+      },
+      "autoTerminatedRelationships": ["success", "failure"]
+    },
+    {
+      "id": 6,
+      "name": "Publish → events.normalized",
+      "type": "org.apache.nifi.processors.kafka.pubsub.PublishKafka_2_6",
+      "position": { "x": 900, "y": 150 },
+      "properties": {
+        "bootstrap.servers": "kafka:9092",
+        "topic": "events.normalized",
+        "acks": "all"
+      },
+      "autoTerminatedRelationships": ["success", "failure"]
+    }
+  ],
+
+  "connections": [
+    { "from": 1, "to": 2, "relationship": "success" },
+    { "from": 2, "to": 3, "relationship": "matched" },
+    { "from": 3, "to": 4, "relationship": "critical" },
+    { "from": 3, "to": 5, "relationship": "error" },
+    { "from": 3, "to": 6, "relationship": "unmatched" }
+  ]
+}

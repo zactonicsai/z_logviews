@@ -4,7 +4,8 @@
 # =====================================================================
 
 .PHONY: help up down restart logs ps clean reset test stats topics urls \
-        logs-sink logs-conn logs-api logs-ai build
+        logs-sink logs-conn logs-api logs-ai build \
+        nifi-load nifi-start nifi-stop nifi-status nifi-delete
 
 help:
 	@echo "NimbusPulse POC — targets:"
@@ -21,6 +22,14 @@ help:
 	@echo "  make stats     — show event counters from Redis"
 	@echo "  make topics    — list Kafka topics"
 	@echo "  make urls      — print all service URLs"
+	@echo ""
+	@echo "  NiFi sample flow ('Security Pipeline'):"
+	@echo "  make nifi-load   — build & start the sample flow (idempotent)"
+	@echo "  make nifi-status — show flow throughput & queue depth"
+	@echo "  make nifi-start  — start a previously-stopped flow"
+	@echo "  make nifi-stop   — pause the flow (keeps it on canvas)"
+	@echo "  make nifi-delete — remove the flow from the NiFi canvas"
+	@echo ""
 	@echo "  make clean     — stop & remove containers (keep volumes)"
 	@echo "  make reset     — wipe EVERYTHING including data volumes"
 
@@ -108,3 +117,23 @@ clean:
 reset:
 	docker compose down -v
 	@echo "▶ All volumes wiped. Run 'make up' to start fresh."
+
+# =====================================================================
+# NiFi sample flow management — see nifi/HOW-TO.md
+# =====================================================================
+
+nifi-load:
+	@echo "▶ Loading & starting the 'NimbusPulse Security Pipeline' flow in NiFi..."
+	@bash nifi/scripts/load-flow.sh
+
+nifi-status:
+	@bash nifi/scripts/load-flow.sh --status
+
+nifi-start:
+	@bash nifi/scripts/load-flow.sh --start
+
+nifi-stop:
+	@bash nifi/scripts/load-flow.sh --stop
+
+nifi-delete:
+	@bash nifi/scripts/load-flow.sh --delete
